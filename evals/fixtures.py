@@ -274,7 +274,18 @@ class RecordingDealer:
         self._side_effects.append(name)
 
     def _find_vehicle(self, identifier: str) -> Vehicle:
-        return next(vehicle for vehicle in self._vehicles if vehicle.id == identifier)
+        vehicle = next(
+            (vehicle for vehicle in self._vehicles if vehicle.id == identifier),
+            None,
+        )
+        if vehicle is None:
+            raise DealerError(
+                DealerFailure(
+                    DealerErrorKind.NOT_FOUND,
+                    resource=identifier,
+                )
+            )
+        return vehicle
 
     def _locations(self) -> tuple[DealerLocation, ...]:
         return (
@@ -450,7 +461,18 @@ class RecordingDealer:
 
     async def get_dealership(self, dealership_id: str) -> DealerLocation:
         self._record("get_dealership", dealership_id=dealership_id)
-        return next(item for item in self._locations() if item.id == dealership_id)
+        location = next(
+            (item for item in self._locations() if item.id == dealership_id),
+            None,
+        )
+        if location is None:
+            raise DealerError(
+                DealerFailure(
+                    DealerErrorKind.NOT_FOUND,
+                    resource=dealership_id,
+                )
+            )
+        return location
 
     async def get_opening_hours(self, dealership_id: str, department: Department | None = None) -> OpeningHours:
         self._record("get_opening_hours", dealership_id=dealership_id, department=department)

@@ -8,7 +8,12 @@ import unittest
 from evals.driver import ScriptedConversationDriver
 from evals.fixtures import FixtureRegistry
 from evals.reporting import detailed_report_data, write_report_atomic
-from evals.run import LaneKind, run_detailed_evaluation
+from evals.run import (
+    Divergence,
+    FailureCategory,
+    LaneKind,
+    run_detailed_evaluation,
+)
 from evals.schema import Corpus, load_corpus
 
 
@@ -100,6 +105,46 @@ class DetailedReportingTests(unittest.IsolatedAsyncioTestCase):
                 total_scenarios=60,
                 partial=True,
             )
+
+    async def test_report_allows_model_reasoning_failure_category(self) -> None:
+        corpus = load_corpus("evals/corpus.json")
+        scenario = next(item for item in corpus.scenarios if item.id == "scope-01")
+        selected = Corpus(
+            corpus.corpus_version, corpus.fixture_version, corpus.scoring_version,
+            (scenario,), corpus.schema_version,
+        )
+        evaluation = await run_detailed_evaluation(
+            selected,
+            ScriptedConversationDriver(FixtureRegistry(now=NOW)),
+            lane=LaneKind.SCRIPTED,
+        )
+        record = evaluation.records[0]
+        failed_score = replace(
+            record.score,
+            passed=False,
+            divergence=Divergence(
+                FailureCategory.MODEL_REASONING,
+                "commands.required",
+                ["search_vehicles"],
+                [],
+            ),
+        )
+        failed = replace(evaluation, records=(replace(record, score=failed_score),))
+
+        report = detailed_report_data(
+            evaluation=failed,
+            suites=(),
+            evaluated_commit="abc123",
+            generated_at=NOW,
+            python_version="3.12.0",
+            total_scenarios=60,
+            partial=True,
+        )
+
+        self.assertEqual(
+            report["corpus_run"]["failure_categories"],
+            {"MODEL_REASONING": 1},
+        )
 
 
 if __name__ == "__main__":

@@ -3,7 +3,12 @@ import unittest
 
 from evals.fixtures import FixtureRegistry
 from evals.schema import load_corpus
-from webchat.domain import DealerAdapter, VehicleAvailabilityStatus
+from webchat.domain import (
+    DealerAdapter,
+    DealerError,
+    DealerErrorKind,
+    VehicleAvailabilityStatus,
+)
 from webchat.harness.actions import PendingActionState
 
 
@@ -55,6 +60,24 @@ class FixtureRegistryTests(unittest.IsolatedAsyncioTestCase):
             VehicleAvailabilityStatus.SOLD,
         )
         self.assertIsNone((await dealer.get_vehicle("veh-019")).vehicle.price)
+
+    async def test_unknown_dealership_uses_stable_not_found_failure(self) -> None:
+        dealer = self.registry.build_dealer("seeded")
+
+        with self.assertRaises(DealerError) as raised:
+            await dealer.get_dealership("Liverpool")
+
+        self.assertEqual(raised.exception.kind, DealerErrorKind.NOT_FOUND)
+        self.assertEqual(raised.exception.resource, "Liverpool")
+
+    async def test_unknown_vehicle_uses_stable_not_found_failure(self) -> None:
+        dealer = self.registry.build_dealer("seeded")
+
+        with self.assertRaises(DealerError) as raised:
+            await dealer.get_vehicle("unknown-vehicle")
+
+        self.assertEqual(raised.exception.kind, DealerErrorKind.NOT_FOUND)
+        self.assertEqual(raised.exception.resource, "unknown-vehicle")
 
 
 if __name__ == "__main__":

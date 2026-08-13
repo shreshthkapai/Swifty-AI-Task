@@ -28,13 +28,32 @@ _LABELLED_PHONE = re.compile(r"(?i)(phone\s+)(?:\+?\d[\d ]{2,})")
 _SECRET_VALUE = re.compile(r"\b(?:sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+)", re.IGNORECASE)
 
 
-def _sanitize(value: Any, *, key: str | None = None) -> Any:
-    if key is not None and any(part in key.casefold() for part in _FORBIDDEN_KEY_PARTS):
+def _sanitize(
+    value: Any,
+    *,
+    key: str | None = None,
+    parent_key: str | None = None,
+) -> Any:
+    allowed_failure_category = (
+        parent_key == "failure_categories" and key == "MODEL_REASONING"
+    )
+    if (
+        key is not None
+        and not allowed_failure_category
+        and any(part in key.casefold() for part in _FORBIDDEN_KEY_PARTS)
+    ):
         raise ValueError(f"report contains forbidden sensitive key: {key}")
     if key is not None and key.casefold() in _PII_KEYS and value is not None:
         return _REDACTED
     if isinstance(value, Mapping):
-        return {str(item_key): _sanitize(item, key=str(item_key)) for item_key, item in value.items()}
+        return {
+            str(item_key): _sanitize(
+                item,
+                key=str(item_key),
+                parent_key=key,
+            )
+            for item_key, item in value.items()
+        }
     if isinstance(value, (list, tuple)):
         return [_sanitize(item) for item in value]
     if isinstance(value, str):
