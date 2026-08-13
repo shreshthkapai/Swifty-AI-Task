@@ -1,0 +1,251 @@
+from datetime import UTC, datetime
+from pathlib import Path
+import unittest
+
+from evals.run import (
+    EvaluationLane,
+    EvaluationReport,
+    FailureCategory,
+    LaneKind,
+    ObservedAnswer,
+    ObservedTurn,
+    assert_lane_parity,
+    run_evaluation,
+    score_turn,
+)
+from evals.schema import load_corpus
+from tests.webchat.fakes.conversation import NoOpConversationDriver
+from webchat.harness.contracts import (
+    PreparationCommand,
+    PreparationCommandName,
+    ReadCommand,
+    ReadCommandName,
+)
+
+
+CORPUS_PATH = Path(__file__).parents[2] / "evals" / "corpus.json"
+
+
+class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
+    async def test_no_op_chatbot_fails_every_corpus_turn(self) -> None:
+        corpus = load_corpus(CORPUS_PATH)
+
+        report = await run_evaluation(corpus, NoOpConversationDriver())
+
+        expected_turns = sum(len(scenario.turns) for scenario in corpus.scenarios)
+        self.assertEqual(report.total_turns, expected_turns)
+        self.assertEqual(report.passed_turns, 0)
+        self.assertEqual(report.failed_turns, expected_turns)
+        self.assertEqual(
+            report.results[0].divergence.category,
+            FailureCategory.ANSWER_QUALITY,
+        )
+        self.assertEqual(report.results[0].divergence.path, "answer.missing")
+
+    def test_valid_observation_passes_semantic_answer_assertions(self) -> None:
+        corpus = load_corpus(CORPUS_PATH)
+        scenario = next(item for item in corpus.scenarios if item.id == "scope-01")
+        turn = scenario.turns[0]
+        observation = ObservedTurn(
+            answer=ObservedAnswer(
+                strategy="domain_redirect",
+                text=(
+                    "I can help with vehicles, test drives, sales, servicing, and "
+                    "Northstar dealership information."
+                ),
+                direct=True,
+            )
+        )
+
+        result = score_turn(scenario.id, turn, observation)
+
+        self.assertTrue(result.passed)
+        self.assertIsNone(result.divergence)
+
+    def test_prohibited_mutation_is_classified_at_policy_layer(self) -> None:
+        corpus = load_corpus(CORPUS_PATH)
+        scenario = next(item for item in corpus.scenarios if item.id == "scope-05")
+        turn = scenario.turns[0]
+        observation = ObservedTurn(
+            commands=(
+                PreparationCommand(
+                    PreparationCommandName.PREPARE_TEST_DRIVE_BOOKING
+                ),
+            ),
+            mutations=("test_drive_booking",),
+            model_calls=1,
+            answer=ObservedAnswer(
+                strategy="action_prepared",
+                block_types=("confirmation",),
+                next_steps=("confirm_or_cancel",),
+                direct=True,
+            ),
+        )
+
+        result = score_turn(scenario.id, turn, observation)
+
+        self.assertFalse(result.passed)
+        self.assertEqual(result.divergence.category, FailureCategory.POLICY_MISSING)
+        self.assertEqual(result.divergence.path, "mutations.prohibited")
+
+    def test_provider_transport_failure_is_not_model_reasoning(self) -> None:
+        corpus = load_corpus(CORPUS_PATH)
+        turn = corpus.scenarios[0].turns[0]
+
+        result = score_turn(
+            corpus.scenarios[0].id,
+            turn,
+            ObservedTurn(provider_failure="timeout"),
+        )
+
+        self.assertEqual(result.divergence.category, FailureCategory.PROVIDER_FAILURE)
+        self.assertEqual(result.divergence.path, "provider")
+
+    def test_first_divergence_is_structured_and_stable(self) -> None:
+        corpus = load_corpus(CORPUS_PATH)
+        scenario = next(item for item in corpus.scenarios if item.id == "vehicle-01")
+        turn = scenario.turns[0]
+        observation = ObservedTurn(
+            commands=(ReadCommand(ReadCommandName.GET_DEALERSHIP_HOURS),),
+            model_calls=1,
+            answer=ObservedAnswer(
+                strategy="search_results",
+                block_types=("vehicle_cards",),
+                facts=("result_count",),
+                next_steps=("refine_or_select",),
+                direct=True,
+            ),
+        )
+
+        result = score_turn(scenario.id, turn, observation)
+
+        self.assertEqual(result.divergence.category, FailureCategory.MODEL_REASONING)
+        self.assertEqual(result.divergence.path, "commands.required")
+        self.assertEqual(result.divergence.expected, ["search_vehicles"])
+        self.assertEqual(result.divergence.actual, ["get_dealership_hours"])
+
+    def test_wrong_command_arguments_fail_with_first_divergence_evidence(self) -> None:
+        corpus = load_corpus(CORPUS_PATH)
+        scenario = next(item for item in corpus.scenarios if item.id == "vehicle-02")
+        turn = scenario.turns[0]
+        observation = ObservedTurn(
+            commands=(
+                ReadCommand.from_mapping(
+                    ReadCommandName.SEARCH_VEHICLES,
+                    {
+                        "make": "BMW",
+                        "transmission": "Automatic",
+                        "max_price_pence": 3_500_000,
+                    },
+                ),
+            ),
+            state={
+                "preferences": {
+                    "make": "BMW",
+                    "transmission": "Automatic",
+                    "max_price_pence": 3_000_000,
+                }
+            },
+            model_calls=1,
+            answer=ObservedAnswer(
+                strategy="search_results",
+                block_types=("vehicle_cards",),
+                facts=("constraints_applied",),
+                next_steps=("select_vehicle",),
+                direct=True,
+            ),
+        )
+
+        result = score_turn(scenario.id, turn, observation)
+
+        self.assertFalse(result.passed)
+        self.assertEqual(result.divergence.category, FailureCategory.MODEL_REASONING)
+        self.assertEqual(result.divergence.path, "commands[0].arguments")
+        self.assertEqual(
+            result.divergence.expected,
+            {
+                "make": "BMW",
+                "max_price_pence": 3_000_000,
+                "transmission": "Automatic",
+            },
+        )
+        self.assertEqual(result.divergence.actual["max_price_pence"], 3_500_000)
+
+    def test_lane_parity_allows_only_planning_source_to_differ(self) -> None:
+        common = {
+            "corpus_version": "2026-08-13.1",
+            "fixture_version": "northstar-seed-v1",
+            "scoring_version": "1",
+            "clock": datetime(2026, 8, 13, 12, 0, tzinfo=UTC),
+            "runtime_policy_version": "runtime-v1",
+        }
+        scripted = EvaluationLane(kind=LaneKind.SCRIPTED, **common)
+        live = EvaluationLane(kind=LaneKind.LIVE_PROVIDER, **common)
+
+        assert_lane_parity(scripted, live)
+
+        changed = EvaluationLane(
+            kind=LaneKind.LIVE_PROVIDER,
+            **{**common, "fixture_version": "different"},
+        )
+        with self.assertRaisesRegex(ValueError, "parity"):
+            assert_lane_parity(scripted, changed)
+
+    def test_evaluation_lane_requires_a_closed_lane_kind(self) -> None:
+        with self.assertRaisesRegex(ValueError, "LaneKind"):
+            EvaluationLane(
+                kind="scripted",
+                corpus_version="2026-08-13.1",
+                fixture_version="northstar-seed-v1",
+                scoring_version="1",
+                clock=datetime(2026, 8, 13, 12, 0, tzinfo=UTC),
+                runtime_policy_version="runtime-v1",
+            )
+
+    def test_turn_scores_and_reports_retain_usage_and_latency_metrics(self) -> None:
+        corpus = load_corpus(CORPUS_PATH)
+        scenario = next(item for item in corpus.scenarios if item.id == "scope-01")
+        turn = scenario.turns[0]
+        observation = ObservedTurn(
+            input_tokens=120,
+            output_tokens=30,
+            latency_ms=18.5,
+            answer=ObservedAnswer(
+                strategy="domain_redirect",
+                text=(
+                    "I can help with vehicles, test drives, sales, servicing, and "
+                    "Northstar dealership information."
+                ),
+                direct=True,
+            ),
+        )
+
+        score = score_turn(scenario.id, turn, observation)
+
+        self.assertEqual(score.input_tokens, 120)
+        self.assertEqual(score.output_tokens, 30)
+        self.assertEqual(score.latency_ms, 18.5)
+        report = EvaluationReport(
+            corpus_version=corpus.corpus_version,
+            scoring_version=corpus.scoring_version,
+            results=(score,),
+        )
+        self.assertEqual(report.total_model_calls, 0)
+        self.assertEqual(report.total_input_tokens, 120)
+        self.assertEqual(report.total_output_tokens, 30)
+        self.assertEqual(report.total_latency_ms, 18.5)
+
+    def test_observed_metrics_cannot_be_negative(self) -> None:
+        for field, value in (
+            ("model_calls", -1),
+            ("input_tokens", -1),
+            ("output_tokens", -1),
+            ("latency_ms", -0.1),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, field):
+                    ObservedTurn(**{field: value})
+
+
+if __name__ == "__main__":
+    unittest.main()
