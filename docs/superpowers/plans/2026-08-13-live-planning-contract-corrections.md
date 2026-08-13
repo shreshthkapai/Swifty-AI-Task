@@ -26,7 +26,7 @@
 
 **Interfaces:**
 - Produces: `_arguments_satisfy(name: str, expected: Mapping[str, Any], actual: Mapping[str, Any]) -> bool`
-- Uses: `webchat.harness.tool_gate.command_spec()` to identify enum-valued fields.
+- Uses: an explicit immutable set of case-insensitive dealership filter fields; IDs, dates, contact data and free text remain exact.
 
 - [ ] **Step 1: Write failing semantic-comparison tests**
 
@@ -54,7 +54,7 @@ Expected: failure because `_arguments_satisfy` does not exist and raw frozen arg
 
 - [ ] **Step 3: Implement required-subset comparison**
 
-Drop null-valued actual properties for comparison, recursively require every expected key, and case-fold only fields whose semantic schema declares an enum. Keep IDs, free text, dates, amounts, and non-enum strings exact. Replace the raw equality check in `_score_turn` with this helper. Do not change answer, state, call, mutation, or side-effect scoring.
+Drop null-valued actual properties for comparison, recursively require every expected key, and case-fold only the named semantic filter fields (`make`, `model`, `fuel_type`, `transmission`, `body_style`, `availability`, `currency`, `sort`, `refinement`, `department`, `enquiry_type`, and `condition`). Keep IDs, free text, dates, contact fields and amounts exact. Replace the raw equality check in `_score_turn` with this helper. Do not change answer, state, call, mutation, or side-effect scoring.
 
 - [ ] **Step 4: Verify GREEN and focused live improvement**
 
