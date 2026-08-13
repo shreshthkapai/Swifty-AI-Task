@@ -2,7 +2,7 @@
   "schema_version": 1,
   "lane": "scripted",
   "fixture": "hermetic-dealer",
-  "evaluated_commit": "fba9c33126169ab3788125fc33cbde4fab877487",
+  "evaluated_commit": "57cd6ef1f0d0552c75203a0f76d5a52dbcde048e",
   "examples": [
     {
       "id": "scope-moon",
