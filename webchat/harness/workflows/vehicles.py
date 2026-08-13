@@ -18,6 +18,7 @@ from webchat.domain.vehicles import (
 )
 
 from ..contracts import ReadCommandName
+from ..policy import PolicyEngine
 from ..render import DeclarativeRenderer
 from ..state import (
     ConversationState,
@@ -46,7 +47,9 @@ async def execute_vehicle_read(
     now: datetime,
     renderer: DeclarativeRenderer,
     id_factory: Callable[[], str],
+    policy: PolicyEngine,
 ) -> CommandOutcome | None:
+    del policy
     if name is ReadCommandName.SEARCH_VEHICLES:
         search_arguments = dict(arguments)
         dealership_id, failure = await resolve_dealership_for_command(

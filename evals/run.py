@@ -409,6 +409,16 @@ def _score_turn(
                     expected_command.to_dict()["arguments"],
                     matching[0].to_dict()["arguments"],
                 )
+    missing_calls = _missing(expectation.required_calls, observed.external_calls)
+    if missing_calls:
+        return _failed(
+            scenario_id,
+            turn.id,
+            FailureCategory.ADAPTER_ERROR,
+            "calls.required",
+            list(expectation.required_calls),
+            list(observed.external_calls),
+        )
     prohibited_calls = set(expectation.prohibited_calls)
     offending_calls = (
         sorted(observed.external_calls)

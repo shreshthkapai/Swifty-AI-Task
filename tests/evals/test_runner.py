@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 import unittest
@@ -131,6 +132,39 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.divergence.category, FailureCategory.PROVIDER_FAILURE)
         self.assertEqual(result.divergence.path, "provider")
+
+    def test_missing_required_adapter_call_is_scored_separately_from_command(self) -> None:
+        corpus = load_corpus(CORPUS_PATH)
+        scenario = next(item for item in corpus.scenarios if item.id == "vehicle-01")
+        turn = replace(
+            scenario.turns[0],
+            expectation=replace(
+                scenario.turns[0].expectation,
+                required_calls=("search_vehicles",),
+            ),
+        )
+        observation = ObservedTurn(
+            commands=(
+                ReadCommand.from_mapping(
+                    ReadCommandName.SEARCH_VEHICLES,
+                    {"body_style": "SUV"},
+                ),
+            ),
+            model_calls=1,
+            answer=ObservedAnswer(
+                strategy="search_results",
+                block_types=("vehicle_cards",),
+                facts=("result_count",),
+                next_steps=("refine_or_select",),
+                direct=True,
+            ),
+        )
+
+        result = score_turn(scenario.id, turn, observation)
+
+        self.assertFalse(result.passed)
+        self.assertEqual(result.divergence.category, FailureCategory.ADAPTER_ERROR)
+        self.assertEqual(result.divergence.path, "calls.required")
 
     def test_first_divergence_is_structured_and_stable(self) -> None:
         corpus = load_corpus(CORPUS_PATH)

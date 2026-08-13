@@ -13,7 +13,12 @@ from webchat.domain.common import (
     Page,
 )
 from webchat.domain.dealer import DealerAdapter
-from webchat.domain.dealerships import DealerLocation, OpeningHours, OpeningPeriod
+from webchat.domain.dealerships import (
+    BusinessInformation,
+    DealerLocation,
+    OpeningHours,
+    OpeningPeriod,
+)
 from webchat.domain.sales import (
     TestDriveBooking,
     TestDriveSlot,
@@ -144,6 +149,15 @@ class FakeProvider:
 def dealer() -> Mock:
     fake = Mock(spec=DealerAdapter)
     fake.list_dealerships.return_value = (location(),)
+    fake.get_business_information.return_value = BusinessInformation(
+        "Northstar Motors",
+        "GBP",
+        "United Kingdom",
+        "Finance is subject to status and terms.",
+        18,
+        "Part-exchange valuations are indicative.",
+        "privacy@northstar.example",
+    )
     return fake
 
 
@@ -490,6 +504,74 @@ class HarnessRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         fake.get_vehicle.assert_awaited_once_with("veh-003")
         self.assertEqual(result.state.entities.selected_vehicle_id, "veh-003")
+
+    async def test_slot_intent_checks_availability_before_retrieving_slots(self) -> None:
+        fake = dealer()
+        calls = []
+
+        async def get_availability(vehicle_id):
+            calls.append(("availability", vehicle_id))
+            return availability()
+
+        async def list_slots(search):
+            calls.append(("slots", search.vehicle_id))
+            return (drive_slot(),)
+
+        fake.get_vehicle_availability.side_effect = get_availability
+        fake.list_test_drive_slots.side_effect = list_slots
+        plan = TurnPlan(
+            TurnScope.IN_DOMAIN,
+            (
+                ReadCommand.from_mapping(
+                    ReadCommandName.FIND_TEST_DRIVE_SLOTS,
+                    {"vehicle_id": "veh-003"},
+                ),
+            ),
+            ResponseStrategy.SLOT_RESULTS,
+        )
+        harness, _ = runtime(fake, plan)
+
+        result = await harness.handle(
+            TurnRequest(
+                current_input="Can I test drive this Saturday?",
+                state=ConversationState(),
+                now=NOW,
+            )
+        )
+
+        self.assertEqual(calls, [("availability", "veh-003"), ("slots", "veh-003")])
+        self.assertIn("slot_choices", {block.kind for block in result.blocks})
+
+    async def test_slot_intent_blocks_reserved_vehicle_before_slot_lookup(self) -> None:
+        fake = dealer()
+        fake.get_vehicle_availability.return_value = availability(
+            VehicleAvailabilityStatus.RESERVED
+        )
+        plan = TurnPlan(
+            TurnScope.IN_DOMAIN,
+            (
+                ReadCommand.from_mapping(
+                    ReadCommandName.FIND_TEST_DRIVE_SLOTS,
+                    {"vehicle_id": "veh-003"},
+                ),
+            ),
+            ResponseStrategy.SLOT_RESULTS,
+        )
+        harness, _ = runtime(fake, plan)
+
+        result = await harness.handle(
+            TurnRequest(
+                current_input="Can I test drive this?",
+                state=ConversationState(),
+                now=NOW,
+            )
+        )
+
+        fake.list_test_drive_slots.assert_not_awaited()
+        self.assertIn(
+            "vehicle_reserved",
+            {block.to_dict()["payload"].get("code") for block in result.blocks},
+        )
 
     async def test_stale_confirm_button_cannot_turn_failed_action_into_a_retry(self) -> None:
         fake = dealer()

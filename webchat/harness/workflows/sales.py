@@ -43,6 +43,7 @@ async def execute_sales_read(
     now: datetime,
     renderer: DeclarativeRenderer,
     id_factory: Callable[[], str],
+    policy: PolicyEngine,
 ) -> CommandOutcome | None:
     if name is not ReadCommandName.FIND_TEST_DRIVE_SLOTS:
         return None
@@ -57,6 +58,17 @@ async def execute_sales_read(
     )
     if failure is not None:
         return failure
+    if vehicle_id is not None:
+        availability = await dealer.get_vehicle_availability(vehicle_id)
+        try:
+            policy.require_test_drive_eligible(availability)
+        except PolicyError as exc:
+            return policy_recovery(
+                state,
+                exc,
+                renderer=renderer,
+                entity_id=vehicle_id,
+            )
     slots = await dealer.list_test_drive_slots(
         TestDriveSlotSearch(
             vehicle_id=vehicle_id,
@@ -165,7 +177,7 @@ async def execute_sales_preparation(
         if failure:
             return failure
         state = _remember_customer(state, customer)
-        return prepare_action(
+        outcome = prepare_action(
             state, action_type=PendingActionType.SALES_ENQUIRY,
             request_type=PendingRequestType.SALES_ENQUIRY,
             payload={
@@ -176,6 +188,18 @@ async def execute_sales_preparation(
             },
             now=now, id_factory=id_factory, renderer=renderer, domain=WorkflowDomain.SALES,
         )
+        if enum_value(
+            EnquiryType,
+            arguments.get("enquiry_type"),
+            "enquiry_type",
+            EnquiryType.GENERAL,
+        ) is EnquiryType.FINANCE:
+            return await _with_business_information(
+                outcome,
+                dealer=dealer,
+                renderer=renderer,
+            )
+        return outcome
 
     if name is PreparationCommandName.PREPARE_VEHICLE_INTEREST:
         vehicle_id = arguments.get("vehicle_id") or state.entities.selected_vehicle_id or state.context.page_vehicle_id
@@ -277,7 +301,7 @@ async def execute_sales_preparation(
         if failure:
             return failure
         state = _remember_customer(state, customer, registration=registration)
-        return prepare_action(
+        outcome = prepare_action(
             state, action_type=PendingActionType.PART_EXCHANGE,
             request_type=PendingRequestType.PART_EXCHANGE,
             payload={
@@ -286,6 +310,11 @@ async def execute_sales_preparation(
                 "condition": enum_value(PartExchangeCondition, condition, "condition").value,
             },
             now=now, id_factory=id_factory, renderer=renderer, domain=WorkflowDomain.SALES,
+        )
+        return await _with_business_information(
+            outcome,
+            dealer=dealer,
+            renderer=renderer,
         )
     return None
 
@@ -314,3 +343,28 @@ def _remember_customer(state: ConversationState, customer, *, registration: str 
             registration=registration or state.customer.registration,
         ),
     )
+
+
+async def _with_business_information(
+    outcome: CommandOutcome,
+    *,
+    dealer: DealerAdapter,
+    renderer: DeclarativeRenderer,
+) -> CommandOutcome:
+    info = await dealer.get_business_information()
+    record = {
+        "organisation": info.organisation,
+        "currency": info.currency,
+        "market": info.market,
+        "finance_notice": info.finance_notice,
+        "finance_minimum_age": info.finance_minimum_age,
+        "part_exchange_notice": info.part_exchange_notice,
+        "privacy_contact": info.privacy_contact,
+    }
+    block = renderer.records(
+        "business_information",
+        (record,),
+        entity_type="business_information",
+        entity_ids=(info.organisation,),
+    )
+    return CommandOutcome(outcome.state, outcome.blocks + (block,))

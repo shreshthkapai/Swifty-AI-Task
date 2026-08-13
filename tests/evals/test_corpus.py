@@ -227,6 +227,7 @@ class CorpusContractTests(unittest.TestCase):
 
         expectation = corpus.scenarios[0].turns[0].expectation
         self.assertEqual(expectation.required_commands, ())
+        self.assertEqual(expectation.required_calls, ())
         self.assertEqual(expectation.prohibited_mutations, ())
         self.assertEqual(expectation.answer.required_facts, ())
 

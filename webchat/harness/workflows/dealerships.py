@@ -36,8 +36,9 @@ async def execute_dealership_read(
     now: datetime,
     renderer: DeclarativeRenderer,
     id_factory: Callable[[], str],
+    policy: PolicyEngine,
 ) -> CommandOutcome | None:
-    del now, id_factory
+    del now, id_factory, policy
     if name is ReadCommandName.LIST_DEALERSHIPS:
         locations = await dealer.list_dealerships()
         return CommandOutcome(

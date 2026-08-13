@@ -171,6 +171,7 @@ class HarnessRuntime:
                 outcome = await handler(
                     self._dealer, command.name, arguments, state=state, now=now,
                     renderer=self._renderer, id_factory=self._id_factory,
+                    policy=self._policy,
                 )
                 if outcome is not None:
                     return outcome

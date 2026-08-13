@@ -182,6 +182,36 @@ class PreparationWorkflowTests(unittest.IsolatedAsyncioTestCase):
         payload = result.state.pending_action.request_payload_dict()
         self.assertEqual(payload["dealership_id"], "northstar-liverpool")
 
+    async def test_finance_and_part_exchange_include_authoritative_qualifications(self) -> None:
+        cases = (
+            (
+                PreparationCommandName.PREPARE_SALES_ENQUIRY,
+                {
+                    "dealership_id": "northstar-manchester",
+                    "enquiry_type": "finance",
+                    "message": "Please contact me about finance.",
+                },
+            ),
+            (
+                PreparationCommandName.PREPARE_PART_EXCHANGE,
+                {
+                    "dealership_id": "northstar-manchester",
+                    "registration": "AB12 CDE",
+                    "mileage": 50_000,
+                    "condition": "good",
+                },
+            ),
+        )
+        for name, arguments in cases:
+            with self.subTest(command=name):
+                fake, result = await self._prepare(name, arguments)
+
+                fake.get_business_information.assert_awaited_once_with()
+                self.assertEqual(
+                    [block.kind for block in result.blocks],
+                    ["confirmation", "business_information"],
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

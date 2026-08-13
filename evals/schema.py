@@ -206,6 +206,7 @@ class AnswerExpectation:
 class TurnExpectation:
     required_commands: tuple[str, ...]
     allowed_commands: tuple[str, ...]
+    required_calls: tuple[str, ...]
     prohibited_calls: tuple[str, ...]
     prohibited_mutations: tuple[str, ...]
     expected_state: dict[str, Any]
@@ -220,6 +221,7 @@ class TurnExpectation:
         optional = {
             "required_commands",
             "allowed_commands",
+            "required_calls",
             "prohibited_calls",
             "prohibited_mutations",
             "expected_state",
@@ -245,6 +247,9 @@ class TurnExpectation:
         return cls(
             required_commands=required_commands,
             allowed_commands=allowed_commands,
+            required_calls=_strings(
+                data.get("required_calls", []), f"{path}.required_calls"
+            ),
             prohibited_calls=_strings(
                 data.get("prohibited_calls", []), f"{path}.prohibited_calls"
             ),
@@ -265,6 +270,7 @@ class TurnExpectation:
         return {
             "required_commands": list(self.required_commands),
             "allowed_commands": list(self.allowed_commands),
+            "required_calls": list(self.required_calls),
             "prohibited_calls": list(self.prohibited_calls),
             "prohibited_mutations": list(self.prohibited_mutations),
             "expected_state": self.expected_state,

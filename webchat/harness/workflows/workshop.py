@@ -39,7 +39,9 @@ async def execute_workshop_read(
     now: datetime,
     renderer: DeclarativeRenderer,
     id_factory: Callable[[], str],
+    policy: PolicyEngine,
 ) -> CommandOutcome | None:
+    del policy
     if name is ReadCommandName.LIST_WORKSHOP_SERVICES:
         services = await dealer.list_service_types()
         records = tuple({
