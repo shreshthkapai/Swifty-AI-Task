@@ -197,6 +197,10 @@ def _validate_arguments(name: str, arguments: Mapping[str, Any]) -> None:
             raise PlanValidationError(f"argument {name}.{field} has the wrong type")
         if isinstance(value, str) and not value.strip():
             raise PlanValidationError(f"argument {name}.{field} cannot be blank")
+        if "enum" in field_schema and value not in field_schema["enum"]:
+            raise PlanValidationError(
+                f"argument {name}.{field} has an unsupported value"
+            )
         if isinstance(value, int) and "minimum" in field_schema and value < field_schema["minimum"]:
             raise PlanValidationError(f"argument {name}.{field} is below its minimum")
         if isinstance(value, list):

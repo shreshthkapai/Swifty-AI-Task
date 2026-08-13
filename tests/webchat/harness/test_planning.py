@@ -304,6 +304,28 @@ class PlanningEngineTests(unittest.IsolatedAsyncioTestCase):
                         )
                     )
 
+    async def test_argument_schema_rejects_unknown_closed_enum_value(self) -> None:
+        provider = FakeProvider(
+            TurnPlan(
+                scope=TurnScope.IN_DOMAIN,
+                commands=(
+                    ReadCommand.from_mapping(
+                        ReadCommandName.GET_DEALERSHIP_HOURS,
+                        {"dealership_id": "northstar-manchester", "department": "bodyshop"},
+                    ),
+                ),
+                response_strategy=ResponseStrategy.DEALERSHIP_DETAILS,
+            )
+        )
+
+        with self.assertRaisesRegex(PlanValidationError, "unsupported value"):
+            await PlanningEngine(provider).decide(
+                TurnRequest(
+                    current_input="When is the bodyshop open?",
+                    state=ConversationState(),
+                    now=NOW,
+                )
+            )
     def test_raw_provider_output_is_strictly_parsed(self) -> None:
         valid = {
             "schema_version": 1,

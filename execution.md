@@ -182,16 +182,16 @@ Keep audit notes, command logs, pass counts, traces, and intermediate evaluation
 
 **Files:** create workflow modules, `harness/policy.py`, `harness/runtime.py`, `harness/render.py`, and mirrored tests.
 
-- [ ] Implement vehicle discovery, refinement, pagination, selection, details, deterministic comparison tables, availability, and offer flows. Preserve null price as `price on request`; never derive or invent a figure.
-- [ ] Implement sales enquiry, test-drive, reserved-vehicle interest, callback, and part-exchange flows with typed field collection and business qualifications.
-- [ ] Implement service discovery, workshop booking, verified lookup, amendment, and cancellation. A successful lookup creates only a short-lived conversation-scoped grant for that booking ID.
-- [ ] Implement dealership discovery, department-specific and holiday opening hours, messages, callbacks, contact details, and finance/privacy/valuation notices from `BusinessInformation`.
-- [ ] Resolve explicit actions deterministically: select entity/slot, show more, confirm, cancel, retry, start over, and switch workflow. Starting a different workflow supersedes an old pending action deterministically.
-- [ ] Enforce required details, valid transitions, capability/tool authorization, verification grants, confirmation state, idempotency identity, vehicle eligibility, slot freshness, and booking status in handlers before adapter calls.
-- [ ] Encode recovery explicitly: a reserved vehicle offers interest/enquiry instead of test drive; a sold vehicle allows enquiry only; an interest request stops if the vehicle is no longer reserved; a lost slot refreshes choices; a cancelled workshop booking cannot be amended.
-- [ ] Immediately before a confirmed mutation, re-read relevant live vehicle/slot/booking truth where possible. Treat the adapter response as final; map `DealerErrorKind` to specific recovery without matching text.
-- [ ] Render versioned declarative blocks (`text`, `vehicle_cards`, `comparison`, `slot_choices`, `confirmation`, `notice`, `actions`, `link`) with stable entity/action references. Model-authored adjacent advice cannot interpolate dealer facts.
-- [ ] Keep orchestration bounded: deterministic gate -> optional one planning call -> validated command batch -> adapter calls -> reducer -> renderer -> atomic commit. There is no recursive agent loop.
+- [x] Implement vehicle discovery, refinement, pagination, selection, details, deterministic comparison tables, availability, and offer flows. Preserve null price as `price on request`; never derive or invent a figure.
+- [x] Implement sales enquiry, test-drive, reserved-vehicle interest, callback, and part-exchange flows with typed field collection and business qualifications.
+- [x] Implement service discovery, workshop booking, verified lookup, amendment, and cancellation. A successful lookup creates only a short-lived conversation-scoped grant for that booking ID.
+- [x] Implement dealership discovery, department-specific and holiday opening hours, messages, callbacks, contact details, and finance/privacy/valuation notices from `BusinessInformation`.
+- [x] Resolve explicit actions deterministically: select entity/slot, show more, confirm, cancel, retry, start over, and switch workflow. Starting a different workflow supersedes an old pending action deterministically.
+- [x] Enforce required details, valid transitions, capability/tool authorization, verification grants, confirmation state, idempotency identity, vehicle eligibility, slot freshness, and booking status in handlers before adapter calls.
+- [x] Encode recovery explicitly: a reserved vehicle offers interest/enquiry instead of test drive; a sold vehicle allows enquiry only; an interest request stops if the vehicle is no longer reserved; a lost slot refreshes choices; a cancelled workshop booking cannot be amended.
+- [x] Immediately before a confirmed mutation, re-read relevant live vehicle/slot/booking truth where possible. Treat the adapter response as final; map `DealerErrorKind` to specific recovery without matching text.
+- [x] Render versioned declarative blocks (`text`, `vehicle_cards`, `comparison`, `slot_choices`, `confirmation`, `notice`, `actions`, `link`) with stable entity/action references. Model-authored adjacent advice cannot interpolate dealer facts.
+- [x] Keep orchestration bounded: deterministic gate -> optional one planning call -> validated command batch -> adapter calls -> reducer -> renderer -> atomic commit. There is no recursive agent loop.
 
 **Exit gate:** focused workflow tests cover every product capability and normalized failure; black-box conversation tests prove questions produce correct structured answers; no invalid mutation reaches a fake dealer; retry and double-confirm tests produce one business record.
 

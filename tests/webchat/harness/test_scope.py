@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from webchat.harness.actions import (
@@ -18,6 +19,9 @@ from webchat.harness.state import (
     PresentationGroup,
     PresentationProvenance,
     PresentedEntity,
+    WorkflowDomain,
+    WorkflowStage,
+    WorkflowState,
 )
 
 
@@ -123,8 +127,58 @@ class ScopeGateTests(unittest.TestCase):
         self.assertEqual(route.kind, DeterministicRouteKind.SHOW_MORE_RESULTS)
         self.assertIsNone(without_results)
 
+    def test_ordinal_selection_routes_only_against_presented_entities(self) -> None:
+        state = ConversationState(
+            presentation_groups=(
+                PresentationGroup(
+                    group_id="vehicles-1",
+                    entity_type="vehicle",
+                    entities=(
+                        PresentedEntity("vehicle-1", 1),
+                        PresentedEntity("vehicle-2", 2),
+                    ),
+                    snapshot_at=NOW,
+                    provenance=PresentationProvenance.DEALER_API,
+                ),
+            )
+        )
+
+        route = self.gate.route(text="the second one", state=state, now=NOW)
+
+        self.assertEqual(route.kind, DeterministicRouteKind.SELECT_PRESENTED_ENTITY)
+        self.assertEqual(route.ordinal, 2)
+        self.assertIsNone(self.gate.route(text="the third one", state=state, now=NOW))
+
+    def test_repeat_confirmation_of_succeeded_action_stays_zero_model(self) -> None:
+        state = ConversationState(
+            pending_action=replace(
+                pending_action(PendingActionState.AWAITING_CONFIRMATION),
+                state=PendingActionState.SUCCEEDED,
+            )
+        )
+
+        route = self.gate.route(text="confirm", state=state, now=NOW)
+
+        self.assertEqual(route.kind, DeterministicRouteKind.CONFIRM_PENDING_ACTION)
+
+    def test_start_over_routes_only_when_there_is_workflow_state_to_clear(self) -> None:
+        active = ConversationState(
+            workflow=WorkflowState(WorkflowDomain.VEHICLES, WorkflowStage.REFINING)
+        )
+
+        route = self.gate.route(text="start over", state=active, now=NOW)
+
+        self.assertEqual(route.kind, DeterministicRouteKind.START_OVER)
+        self.assertIsNone(
+            self.gate.route(text="start over", state=ConversationState(), now=NOW)
+        )
+
     def test_standalone_obvious_trivia_redirects(self) -> None:
-        for text in ("What size is the moon?", "Who won the World Cup?"):
+        for text in (
+            "What size is the moon?",
+            "Who won the World Cup?",
+            "How do I bake a chocolate cake?",
+        ):
             with self.subTest(text=text):
                 route = self.gate.route(text=text, state=ConversationState(), now=NOW)
                 self.assertEqual(route.kind, DeterministicRouteKind.DOMAIN_REDIRECT)
@@ -134,6 +188,7 @@ class ScopeGateTests(unittest.TestCase):
             "Is an SUV good for a family of five?",
             "I'm moving to Manchester and need something big enough for two kids.",
             "How big is the moon, and will my telescope fit in this X3?",
+            "Who won the World Cup, and do you have BMW SUVs?",
         )
 
         for text in messages:
@@ -141,6 +196,23 @@ class ScopeGateTests(unittest.TestCase):
                 self.assertIsNone(
                     self.gate.route(text=text, state=ConversationState(), now=NOW)
                 )
+
+        contextual = ConversationState(
+            presentation_groups=(
+                PresentationGroup(
+                    group_id="vehicles-1", entity_type="vehicle",
+                    entities=(PresentedEntity("veh-003", 1),), snapshot_at=NOW,
+                    provenance=PresentationProvenance.DEALER_API,
+                ),
+            )
+        )
+        self.assertIsNone(
+            self.gate.route(
+                text="How big is the moon, and will my telescope fit in it?",
+                state=contextual,
+                now=NOW,
+            )
+        )
 
     def test_blank_or_broad_action_language_reaches_the_planner(self) -> None:
         for text in (None, "", "do it", "yes, I am looking for an SUV"):

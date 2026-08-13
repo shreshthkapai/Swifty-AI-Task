@@ -67,6 +67,7 @@ def response_payload(plan: dict | None = None) -> dict:
                     "page": None,
                     "page_size": None,
                     "query": None,
+                    "refinement": None,
                     "sort": None,
                     "transmission": None,
                 },
@@ -177,6 +178,12 @@ class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
             arguments = variant["properties"]["arguments"]
             self.assertFalse(arguments["additionalProperties"])
             self.assertEqual(set(arguments["required"]), set(arguments["properties"]))
+        search = next(
+            item for item in variants
+            if item["properties"]["name"]["const"] == "search_vehicles"
+        )
+        availability = search["properties"]["arguments"]["properties"]["availability"]
+        self.assertIn(None, availability["enum"])
 
     async def test_invalid_json_and_refusal_are_stable_provider_failures(self) -> None:
         payloads = (

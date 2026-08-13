@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 import json
-import re
 from typing import Any, Iterable
 
 from webchat.domain.common import require_aware
@@ -20,6 +19,7 @@ from .contracts import (
     thaw_json_object,
 )
 from .state import ConversationState, WorkflowDomain
+from .signals import DOMAIN_SIGNALS
 
 
 TOOL_GATE_POLICY_VERSION = 1
@@ -66,6 +66,8 @@ class SemanticCommandSpec:
 
 
 def _nullable(kind: str, **extra: Any) -> dict[str, Any]:
+    if "enum" in extra and None not in extra["enum"]:
+        extra = {**extra, "enum": [*extra["enum"], None]}
     return {"type": [kind, "null"], **extra}
 
 
@@ -104,6 +106,8 @@ T = WorkflowDomain.TEST_DRIVE
 W = WorkflowDomain.WORKSHOP
 D = WorkflowDomain.DEALERSHIP
 
+_DEPARTMENT = _nullable("string", enum=["sales", "service", "parts", "general"])
+
 _VEHICLE_ID = {"vehicle_id": _nullable("string")}
 _CUSTOMER = {
     "first_name": _nullable("string"),
@@ -124,14 +128,15 @@ _CATALOGUE = (
             "fuel_type": _nullable("string"),
             "transmission": _nullable("string"),
             "body_style": _nullable("string"),
-            "availability": _nullable("string"),
+            "availability": _nullable("string", enum=["available", "reserved", "sold"]),
             "dealership_id": _nullable("string"),
             "min_price_minor": _nullable("integer", minimum=0),
             "max_price_minor": _nullable("integer", minimum=0),
             "currency": _nullable("string"),
             "max_mileage": _nullable("integer", minimum=0),
             "min_year": _nullable("integer"),
-            "sort": _nullable("string"),
+            "sort": _nullable("string", enum=["newest", "price_asc", "price_desc", "mileage_asc"]),
+            "refinement": _nullable("string", enum=["lower_max_price", "cheaper_than_selected"]),
             "page": _nullable("integer", minimum=1),
             "page_size": _nullable("integer", minimum=1),
         },
@@ -162,7 +167,7 @@ _CATALOGUE = (
     ),
     _spec(ReadCommandName.LIST_DEALERSHIPS, (D, S, T, W), "List dealership locations."),
     _spec(ReadCommandName.GET_DEALERSHIP_DETAILS, (D,), "Get contact and location details for one dealership.", {"dealership_id": _nullable("string")}),
-    _spec(ReadCommandName.GET_DEALERSHIP_HOURS, (D,), "Get regular and holiday opening hours by department.", {"dealership_id": _nullable("string"), "department": _nullable("string")}),
+    _spec(ReadCommandName.GET_DEALERSHIP_HOURS, (D,), "Get regular and holiday opening hours by department.", {"dealership_id": _nullable("string"), "department": _DEPARTMENT}),
     _spec(ReadCommandName.GET_BUSINESS_INFORMATION, (D, S), "Get authoritative finance, part-exchange and privacy notices."),
     _spec(
         PreparationCommandName.PREPARE_TEST_DRIVE_BOOKING,
@@ -174,7 +179,7 @@ _CATALOGUE = (
         PreparationCommandName.PREPARE_SALES_ENQUIRY,
         (S,),
         "Prepare, but never send, a vehicle or general sales enquiry.",
-        {"dealership_id": _nullable("string"), "enquiry_type": _nullable("string"), **_CUSTOMER, "message": _nullable("string"), **_VEHICLE_ID},
+        {"dealership_id": _nullable("string"), "enquiry_type": _nullable("string", enum=["general", "availability", "finance", "part_exchange"]), **_CUSTOMER, "message": _nullable("string"), **_VEHICLE_ID},
     ),
     _spec(
         PreparationCommandName.PREPARE_VEHICLE_INTEREST,
@@ -186,13 +191,13 @@ _CATALOGUE = (
         PreparationCommandName.PREPARE_CALLBACK,
         (S, W, D),
         "Prepare a dealership callback request.",
-        {"dealership_id": _nullable("string"), "department": _nullable("string"), **_CUSTOMER, "reason": _nullable("string"), "preferred_time": _nullable("string"), **_VEHICLE_ID},
+        {"dealership_id": _nullable("string"), "department": _DEPARTMENT, **_CUSTOMER, "reason": _nullable("string"), "preferred_time": _nullable("string"), **_VEHICLE_ID},
     ),
     _spec(
         PreparationCommandName.PREPARE_PART_EXCHANGE,
         (S,),
         "Prepare a part-exchange valuation request.",
-        {"dealership_id": _nullable("string"), **_CUSTOMER, "registration": _nullable("string"), "mileage": _nullable("integer", minimum=0), "condition": _nullable("string")},
+        {"dealership_id": _nullable("string"), **_CUSTOMER, "registration": _nullable("string"), "mileage": _nullable("integer", minimum=0), "condition": _nullable("string", enum=["excellent", "good", "fair"])},
     ),
     _spec(
         PreparationCommandName.PREPARE_WORKSHOP_BOOKING,
@@ -211,7 +216,7 @@ _CATALOGUE = (
         PreparationCommandName.PREPARE_DEALERSHIP_MESSAGE,
         (D,),
         "Prepare a message to a dealership department.",
-        {"dealership_id": _nullable("string"), "department": _nullable("string"), "subject": _nullable("string"), "message": _nullable("string"), **_CUSTOMER, "preferred_contact_method": _nullable("string")},
+        {"dealership_id": _nullable("string"), "department": _DEPARTMENT, "subject": _nullable("string"), "message": _nullable("string"), **_CUSTOMER, "preferred_contact_method": _nullable("string", enum=["email", "phone"])},
     ),
 )
 
@@ -225,17 +230,6 @@ _SAFE_ENTRY_READS = {
     ReadCommandName.LIST_DEALERSHIPS.value,
     ReadCommandName.GET_BUSINESS_INFORMATION.value,
 }
-_DOMAIN_SIGNALS = {
-    V: re.compile(r"\b(vehicle|car|cars|bmw|mini|suv|hatchback|saloon|automatic|manual|petrol|diesel|electric|budget|cheaper)\b"),
-    S: re.compile(
-        r"\b(sales|enquiry|callback|call me|part exchange|trade in|valuation|interest)\b"
-    ),
-    T: re.compile(r"\b(test drive|drive it|try it)\b"),
-    W: re.compile(r"\b(workshop|service|servicing|mot|repair|maintenance|tyres?)\b"),
-    D: re.compile(r"\b(dealer|dealership|branch|location|opening|hours|contact)\b"),
-}
-
-
 def command_catalogue() -> tuple[SemanticCommandSpec, ...]:
     return _CATALOGUE
 
@@ -321,7 +315,7 @@ class ToolGate:
         active_domain = state.workflow.domain
         signalled_domains = {
             domain
-            for domain, pattern in _DOMAIN_SIGNALS.items()
+            for domain, pattern in DOMAIN_SIGNALS.items()
             if pattern.search(current_input.casefold())
         }
         pending = state.pending_action
