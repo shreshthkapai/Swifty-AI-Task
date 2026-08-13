@@ -33,6 +33,7 @@ browser-delivered code.
 Start with:
 
 - [PRODUCT-BRIEF.md](./PRODUCT-BRIEF.md) for the product requirements;
+- [docs/README.md](./docs/README.md) for the adapter documentation;
 - [docs/INTEGRATION-GUIDE.md](./docs/INTEGRATION-GUIDE.md) for API usage;
 - [docs/BUSINESS-SEMANTICS.md](./docs/BUSINESS-SEMANTICS.md) for operation outcomes;
 - [docs/SEEDED-SCENARIOS.md](./docs/SEEDED-SCENARIOS.md) for the seed data catalogue.
@@ -52,6 +53,19 @@ docker compose down
 ```
 
 State is retained in the `northstar-platform-data` Docker volume until reset or removal.
+
+## Adapter development
+
+The dealer-independent contracts and Northstar adapter require Python 3.12 or newer:
+
+```bash
+python -m pip install .
+python -m unittest discover -s tests/webchat -p "test_*.py" -v
+```
+
+The live contract tests start an isolated dealership-platform process and temporary SQLite
+database. Runtime configuration uses `NORTHSTAR_BASE_URL` and the server-side
+`NORTHSTAR_API_KEY`; never expose the API key to browser code.
 
 ## Dealership services
 

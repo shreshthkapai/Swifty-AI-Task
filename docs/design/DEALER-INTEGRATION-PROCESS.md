@@ -1,8 +1,8 @@
 # Dealer Integration Process
 
-> **Solution design 2 of 6 — How.** This document turns dealer-system discovery into a repeatable integration method whose output is a typed, dealer-specific adapter contract.
->
-> Previous: [Harness Approach](./HARNESS-APPROACH.md) · Next: [Northstar Adapter Specification](./NORTHSTAR-ADAPTER-SPEC.md)
+This document turns dealer-system discovery into a repeatable integration method whose output is a typed, dealer-specific adapter contract.
+
+Next: [Northstar Adapter Specification](./NORTHSTAR-ADAPTER-SPEC.md)
 
 ## Context
 

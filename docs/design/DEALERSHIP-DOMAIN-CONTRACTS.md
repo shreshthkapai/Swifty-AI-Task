@@ -1,14 +1,14 @@
 # Dealership Domain Contracts
 
-> **Solution design 5 of 6 — Implementation vocabulary.** This document defines the dealer-independent types and port used by the harness and implemented by the Northstar adapter.
->
-> Previous: [Evaluation Strategy](./EVALUATION-STRATEGY.md) · Next: [Northstar Adapter Implementation](./NORTHSTAR-ADAPTER-IMPLEMENTATION.md)
+This document defines the dealer-independent types and port implemented by the Northstar adapter.
+
+Previous: [Northstar Adapter Specification](./NORTHSTAR-ADAPTER-SPEC.md) · Next: [Northstar Adapter Implementation](./NORTHSTAR-ADAPTER-IMPLEMENTATION.md)
 
 ## Purpose and Boundary
 
 The harness must not pass Northstar JSON, HTTP details, or vendor error strings through its workflows. It depends on an immutable dealership vocabulary and an asynchronous `DealerAdapter` protocol. The Northstar adapter translates between that vocabulary and the supplied platform.
 
-The domain owns dealership facts and business requests. The harness owns conversational state, confirmation, execution lifecycle, persistence, and model orchestration. Consequently, `TestDriveBookingRequest` belongs in `domain/`, while `PendingAction` and its expiry, confirmation state, idempotency key, attempts, and last failure belong in `harness/actions.py`.
+The domain owns dealership facts and business requests. Calling applications own conversational state, confirmations, execution lifecycle, persistence, and model orchestration. Consequently, `TestDriveBookingRequest` belongs in `domain/`, while confirmation and execution metadata remain outside this package.
 
 ```text
 webchat/
@@ -20,8 +20,6 @@ webchat/
 │   ├── dealerships.py
 │   ├── errors.py
 │   └── dealer.py
-├── harness/
-│   └── actions.py
 └── adapters/
     └── northstar/
 ```
@@ -67,7 +65,7 @@ list_dealerships; get_dealership; get_opening_hours
 send_dealership_message; get_business_information
 ```
 
-Reads accept typed query objects and return typed records or pages. Creates accept a typed business request plus a keyword-only `idempotency_key`. The key is generated and retained by `PendingAction`; it is execution identity, not customer intent. Amendment is reconciled with `get_workshop_booking` after ambiguous failure, while cancellation remains repeat-safe.
+Reads accept typed query objects and return typed records or pages. Creates accept a typed business request plus a keyword-only `idempotency_key`. The calling application retains that execution identity separately from customer intent. Amendment is reconciled with `get_workshop_booking` after ambiguous failure, while cancellation remains repeat-safe.
 
 The protocol is intentionally structural. Tests and evaluations can supply a small `FakeDealer` without inheriting from framework classes, and a future dealer can use REST, GraphQL, or another system without changing harness workflows.
 
@@ -96,19 +94,17 @@ Adapters raise one structured `DealerError` carrying an immutable `DealerFailure
 ## Action Flow
 
 ```text
-typed customer intent → business request → PendingAction snapshot
-→ explicit confirmation → adapter call with stable idempotency key
+typed customer intent → business request → explicit confirmation
+→ adapter call with stable idempotency key
 → typed record or DealerError → deterministic workflow transition
 ```
 
 Changing a confirmed request creates a new pending action and execution identity. Retrying the same action reuses its exact request and key. Successful or ambiguous mutations are recorded before generating customer-facing prose, preventing the model from controlling side effects.
 
-`PendingAction` stores an action ID, typed request, lifecycle state, creation/expiry/confirmation timestamps, idempotency key, attempt count, and optional last `DealerFailure`. Its states are `pending`, `confirmed`, `executing`, `succeeded`, `failed`, and `cancelled`; validated immutable transitions return a new value rather than mutating the existing snapshot.
-
 ## Verification
 
-Standard-library `unittest` coverage checks constructor invariants, enum/status semantics, immutable records, all 24 adapter signatures, error semantics, and pending-action transitions. A fake adapter proves structural protocol conformance. Northstar mapping tests belong beside its adapter and must cover null prices, relative asset paths, UTC timestamps, field errors, all recovery-relevant error codes, and idempotent replays.
+Standard-library `unittest` coverage checks constructor invariants, enum/status semantics, immutable records, all 24 adapter signatures, and error semantics. A fake adapter proves structural protocol conformance. Northstar mapping tests belong beside its adapter and must cover null prices, relative asset paths, UTC timestamps, field errors, all recovery-relevant error codes, and idempotent replays.
 
 ## Non-goals
 
-This layer does not implement HTTP, Northstar authentication, JSON parsing, persistence, prompts, tool schemas, UI response formatting, retries, or complete workflows. Those components consume these contracts in later steps.
+This layer does not implement HTTP, Northstar authentication, JSON parsing, persistence, prompts, UI response formatting, or complete workflows. Those concerns belong to adapters and calling applications.

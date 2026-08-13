@@ -1,8 +1,8 @@
 # Northstar Dealer Adapter Specification
 
-> **Solution design 3 of 6 — Applied result.** This is the Northstar-specific contract produced by applying the [Dealer Integration Process](./DEALER-INTEGRATION-PROCESS.md).
->
-> Previous: [Dealer Integration Process](./DEALER-INTEGRATION-PROCESS.md) · Next: [Evaluation Strategy](./EVALUATION-STRATEGY.md)
+This is the Northstar-specific contract produced by applying the [Dealer Integration Process](./DEALER-INTEGRATION-PROCESS.md).
+
+Previous: [Dealer Integration Process](./DEALER-INTEGRATION-PROCESS.md) · Next: [Dealership Domain Contracts](./DEALERSHIP-DOMAIN-CONTRACTS.md)
 
 ## Purpose and source of truth
 

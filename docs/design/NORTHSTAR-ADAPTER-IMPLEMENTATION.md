@@ -74,7 +74,7 @@ Isolated `unittest.IsolatedAsyncioTestCase` tests use `httpx.MockTransport` to v
 
 Live contract tests start the supplied platform on an isolated port with a temporary SQLite database. They exercise all 24 methods through real HTTP and cover the seeded reserved/sold vehicles, stale slots, incorrect workshop identity, cancelled amendments, replayed creates, and idempotency conflicts. Test reset uses only the temporary instance; the Docker volume and developer data are untouched.
 
-Step 5 is complete only when isolated adapter tests, live adapter contract tests, existing domain/evaluation tests, and the supplied platform tests all pass. This creates a deterministic, measurable integration boundary before model orchestration begins.
+The adapter is complete only when isolated adapter tests, live adapter contract tests, domain tests, and the supplied platform tests all pass. This creates a deterministic, measurable integration boundary for calling applications.
 
 Run the implementation proof from the repository root:
 
@@ -87,4 +87,4 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 ## Non-goals
 
-This step does not add prompts, tools, conversation state, confirmation UI, persistence, model-provider code, general caching, or a generated OpenAPI client. It does not modify Northstar behaviour or seed data.
+This implementation is limited to domain-to-Northstar translation. It does not modify Northstar behaviour or seed data.
