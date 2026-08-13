@@ -6,6 +6,7 @@ The authored integration documents follow the progression from discovery to a ve
 2. [Northstar Adapter Specification](./design/NORTHSTAR-ADAPTER-SPEC.md) records Northstar capabilities, validation, errors, mutations, and business constraints.
 3. [Dealership Domain Contracts](./design/DEALERSHIP-DOMAIN-CONTRACTS.md) defines the dealer-independent models and adapter protocol.
 4. [Northstar Adapter Implementation](./design/NORTHSTAR-ADAPTER-IMPLEMENTATION.md) explains the HTTP boundary and its verification strategy.
+5. [Full Corpus Evaluation](./design/FULL-CORPUS-EVALUATION.md) defines executable conversational scoring and reviewer evidence.
 
 Supplied platform references remain the source of Northstar business behaviour:
 
