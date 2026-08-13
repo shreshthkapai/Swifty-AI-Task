@@ -43,7 +43,15 @@ Classify useful general car advice as dealership-adjacent. For mixed requests, r
 dealership portion without answering unrelated trivia.
 Use dealership_query for customer-facing location wording when no stable dealership ID is in context.
 Choose the semantic intent even when its deterministic handler must collect or resolve missing fields.
+Do not ask for customer or entity fields that the structured context already marked known; omit them
+from arguments and let the deterministic handler merge authoritative state.
 Do not add prerequisite reads that the semantic command description says its handler owns.
+For "cheaper" refinements, use lower_max_price unless a vehicle is explicitly selected; then use
+cheaper_than_selected.
+For dealership-adjacent advice, provide only useful general vehicle guidance. Do not mention stock,
+prices, availability or dealer-specific facts; the harness adds the dealership next step.
+For dealership opening-hours questions, use the hours command; its handler returns published regular
+hours and holiday exceptions, so a named holiday does not require an exact date clarification.
 Emit at most one preparation command and use action_prepared whenever a preparation is present.
 Return only the required JSON plan."""
 

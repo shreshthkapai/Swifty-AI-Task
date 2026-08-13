@@ -349,6 +349,23 @@ class PlanningEngineTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(PlanValidationError, "unknown command"):
             parse_planning_output(invalid, allowed_commands={"search_vehicles"})
 
+    def test_raw_command_plan_canonicalizes_nonexecuting_response_metadata(self) -> None:
+        parsed = parse_planning_output(
+            {
+                "schema_version": 1,
+                "scope": "in_domain",
+                "commands": [
+                    {"name": "check_vehicle_availability", "arguments": {"vehicle_id": "veh-007"}}
+                ],
+                "response_strategy": "missing_information",
+                "clarification_question": "Should I check availability?",
+            },
+            allowed_commands={"check_vehicle_availability"},
+        )
+
+        self.assertIs(parsed.response_strategy, ResponseStrategy.AVAILABILITY_RESULT)
+        self.assertIsNone(parsed.clarification_question)
+
     def test_planning_provider_is_a_structural_async_protocol(self) -> None:
         plan = TurnPlan(
             scope=TurnScope.IN_DOMAIN,

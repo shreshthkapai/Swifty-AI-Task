@@ -81,6 +81,11 @@ class RuntimeQuestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(provider.requests), 1)
         self.assertEqual(result.model_calls, 1)
         self.assertIn("rear-seat space", result.blocks[0].to_dict()["payload"]["text"])
+        self.assertEqual(result.blocks[1].kind, "actions")
+        self.assertEqual(
+            result.blocks[1].to_dict()["payload"]["actions"][0]["action_type"],
+            "switch_workflow",
+        )
         self.assertEqual(fake.method_calls, [])
 
     async def test_mixed_moon_question_answers_only_vehicle_space_from_dealer_data(self) -> None:

@@ -10,7 +10,7 @@ from evals.run import ObservedAnswer, ObservedTurn
 from webchat.harness.actions import PendingActionState, PendingActionType
 from webchat.harness.contracts import HarnessCommand, ResponseStrategy
 from webchat.harness.runtime import TurnResult
-from webchat.harness.state import ConversationState
+from webchat.harness.state import ConversationState, WorkflowDomain
 
 
 OBSERVABLE_BLOCK_TYPES = frozenset({
@@ -177,6 +177,11 @@ def observe_turn(
                     entity_id = action.get("entity_id")
                     if isinstance(entity_id, str):
                         _append(entity_ids, entity_id)
+                        if (
+                            action_type == "switch_workflow"
+                            and entity_id == WorkflowDomain.VEHICLES.value
+                        ):
+                            _append(next_steps, "offer_stock_search")
 
         if kind == "vehicle_cards":
             _append(facts, "result_count", "constraints_applied", "dealer_stock_only", "vehicle_results")
@@ -288,10 +293,17 @@ def observe_turn(
     if "search_vehicles" in command_names and "cheaper" in current_input.casefold():
         _append(facts, "lower_priced_results", "lower_than_selected_price")
     rendered_text = " ".join(text_parts).casefold()
-    family_terms = ("rear-seat", "boot", "child-seat", "running costs")
-    if sum(term in rendered_text for term in family_terms) >= 2:
+    family_considerations = (
+        ("rear-seat", "rear seat", "rear-legroom", "rear legroom"),
+        ("boot", "luggage space"),
+        ("child-seat", "child seat", "isofix"),
+        ("running costs", "fuel economy"),
+    )
+    if sum(any(term in rendered_text for term in group) for group in family_considerations) >= 2:
         _append(facts, "family_vehicle_considerations")
-    if "rear-seat" in rendered_text and "boot" in rendered_text:
+    if any(term in rendered_text for term in family_considerations[0]) and any(
+        term in rendered_text for term in family_considerations[1]
+    ):
         _append(next_steps, "compare_space")
     if "the second" in current_input.casefold():
         _append(facts, "selected_second_presented_vehicle")
@@ -308,6 +320,8 @@ def observe_turn(
         "verification_failed": ("booking_not_found",),
         "verification_required": ("verification_required",),
         "booking_cancelled": ("already_cancelled", "status:cancelled"),
+        "vehicle_reserved": ("vehicle_status:reserved",),
+        "vehicle_sold": ("vehicle_status:sold",),
         "action_cancelled": ("action_cancelled",),
     }
     code_steps = {
@@ -324,7 +338,20 @@ def observe_turn(
         _append(facts, *code_facts.get(code, ()))
         _append(next_steps, *code_steps.get(code, ()))
     if "missing_information" in notice_codes:
-        if "maximum" in " ".join(text_parts).casefold() and "minimum" in " ".join(text_parts).casefold():
+        clarification_text = " ".join(text_parts).casefold()
+        price_conflict = (
+            "budget conflict" in clarification_text
+            or "budget conflicts" in clarification_text
+            or (
+                "under" in clarification_text
+                and "at least" in clarification_text
+            )
+            or (
+                "maximum" in clarification_text
+                and "minimum" in clarification_text
+            )
+        )
+        if price_conflict:
             _append(next_steps, "clarify_price_direction")
         else:
             _append(facts, "missing_customer_fields")
@@ -350,6 +377,8 @@ def observe_turn(
             _append(facts, "original_booking_reference")
     if "register_interest" in action_types:
         _append(next_steps, "register_interest")
+    if "sales_enquiry" in action_types:
+        _append(next_steps, "sales_enquiry")
     if "show_more" in action_types or "show_more" in current_input.casefold():
         _append(facts, "next_result_page")
     if result.deterministic_route and result.deterministic_route.value in {"select_presented_entity", "ui_action"} and "confirmation" in block_types:
@@ -363,7 +392,9 @@ def observe_turn(
     if "holiday_service_closed" in facts:
         _append(next_steps, "choose_another_date")
     if planning_strategy is ResponseStrategy.ADJACENT_ADVICE and any(
-        "show" in text.casefold() and "stock" in text.casefold() for text in text_parts
+        any(verb in text.casefold() for verb in ("show", "find", "browse", "see"))
+        and "stock" in text.casefold()
+        for text in text_parts
     ):
         _append(next_steps, "offer_stock_search")
 

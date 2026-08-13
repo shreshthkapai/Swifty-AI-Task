@@ -16,6 +16,28 @@ from webchat.harness.state import ConversationState, MessageBlock
 
 
 class ObservationTests(unittest.TestCase):
+    def test_price_conflict_clarification_is_not_mislabeled_customer_details(self) -> None:
+        result = TurnResult(
+            state=ConversationState(),
+            blocks=(MessageBlock("notice", {
+                "schema_version": 1,
+                "code": "missing_information",
+                "text": "Your budget conflicts: under £30,000 or at least £50,000?",
+            }),),
+        )
+
+        observed = observe_turn(
+            result,
+            before_state=ConversationState(),
+            before_dealer=DealerSnapshot((), ()),
+            after_dealer=DealerSnapshot((), ()),
+            commands=(),
+            planning_strategy=ResponseStrategy.MISSING_INFORMATION,
+        )
+
+        self.assertIn("clarify_price_direction", observed.answer.next_steps)
+        self.assertNotIn("provide_customer_details", observed.answer.next_steps)
+
     def test_notice_and_choices_are_derived_from_blocks(self) -> None:
         result = TurnResult(
             state=ConversationState(),
@@ -69,6 +91,30 @@ class ObservationTests(unittest.TestCase):
         )
 
         self.assertNotIn("family_vehicle_considerations", observed.answer.facts)
+
+    def test_family_guidance_accepts_natural_wording_and_stock_offer(self) -> None:
+        result = TurnResult(
+            state=ConversationState(),
+            blocks=(MessageBlock("text", {
+                "schema_version": 1,
+                "text": (
+                    "Check rear seats, ISOFIX points and boot space. "
+                    "Would you like me to find family SUVs in our current stock?"
+                ),
+            }),),
+        )
+
+        observed = observe_turn(
+            result,
+            before_state=ConversationState(),
+            before_dealer=DealerSnapshot((), ()),
+            after_dealer=DealerSnapshot((), ()),
+            commands=(),
+            planning_strategy=ResponseStrategy.ADJACENT_ADVICE,
+        )
+
+        self.assertIn("family_vehicle_considerations", observed.answer.facts)
+        self.assertIn("offer_stock_search", observed.answer.next_steps)
 
 
 if __name__ == "__main__":

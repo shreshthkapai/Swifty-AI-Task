@@ -159,9 +159,23 @@ async def execute_sales_preparation(
         )
 
     if name is PreparationCommandName.PREPARE_SALES_ENQUIRY:
+        enquiry_arguments = dict(arguments)
+        vehicle_id = (
+            arguments.get("vehicle_id")
+            or state.entities.selected_vehicle_id
+            or state.context.page_vehicle_id
+        )
+        if (
+            vehicle_id is not None
+            and not enquiry_arguments.get("dealership_id")
+            and not enquiry_arguments.get("dealership_query")
+            and state.entities.selected_dealer_id is None
+        ):
+            details = await dealer.get_vehicle(vehicle_id)
+            enquiry_arguments["dealership_id"] = details.vehicle.dealership_id
         dealership_id, resolution_failure = await resolve_dealership_for_command(
             dealer,
-            arguments,
+            enquiry_arguments,
             state=state,
             domain=WorkflowDomain.SALES,
             renderer=renderer,
@@ -184,7 +198,7 @@ async def execute_sales_preparation(
                 "dealership_id": dealership_id,
                 "enquiry_type": enum_value(EnquiryType, arguments.get("enquiry_type"), "enquiry_type", EnquiryType.GENERAL).value,
                 "customer": customer_payload(customer), "message": message,
-                "vehicle_id": arguments.get("vehicle_id") or state.entities.selected_vehicle_id,
+                "vehicle_id": vehicle_id,
             },
             now=now, id_factory=id_factory, renderer=renderer, domain=WorkflowDomain.SALES,
         )
@@ -205,14 +219,14 @@ async def execute_sales_preparation(
         vehicle_id = arguments.get("vehicle_id") or state.entities.selected_vehicle_id or state.context.page_vehicle_id
         if not vehicle_id:
             return missing_information(state, ("vehicle_id",), domain=WorkflowDomain.SALES, renderer=renderer)
-        customer, failure = _customer(policy, arguments, state, WorkflowDomain.SALES, renderer)
-        if failure:
-            return failure
         availability = await dealer.get_vehicle_availability(vehicle_id)
         try:
             policy.require_interest_eligible(availability)
         except PolicyError as exc:
             return policy_recovery(state, exc, renderer=renderer, entity_id=vehicle_id)
+        customer, failure = _customer(policy, arguments, state, WorkflowDomain.SALES, renderer)
+        if failure:
+            return failure
         state = _remember_customer(state, customer)
         return prepare_action(
             state, action_type=PendingActionType.VEHICLE_INTEREST,
@@ -232,8 +246,12 @@ async def execute_sales_preparation(
         )
         if resolution_failure is not None:
             return resolution_failure
-        reason = arguments.get("reason")
-        missing = tuple(key for key, value in (("dealership_id", dealership_id), ("reason", reason)) if not value)
+        reason = arguments.get("reason") or "Callback request"
+        missing = tuple(
+            key
+            for key, value in (("dealership_id", dealership_id),)
+            if not value
+        )
         if missing:
             return missing_information(state, missing, domain=WorkflowDomain.SALES, renderer=renderer)
         customer, failure = _customer(policy, arguments, state, WorkflowDomain.SALES, renderer)

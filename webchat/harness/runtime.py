@@ -442,7 +442,16 @@ class HarnessRuntime:
             return (self._renderer.notice(clarification, code="missing_information"),)
         if strategy is ResponseStrategy.ADJACENT_ADVICE:
             if self._policy.is_safe_adjacent_advice(advice):
-                return (self._renderer.text(advice),)
+                return (
+                    self._renderer.text(advice),
+                    self._renderer.actions(
+                        ((
+                            "switch_workflow",
+                            "Search current stock",
+                            WorkflowDomain.VEHICLES.value,
+                        ),)
+                    ),
+                )
             return (
                 self._renderer.notice(
                     "I can offer general vehicle guidance, but current prices and availability must come from a dealership search.",

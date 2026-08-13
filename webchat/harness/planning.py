@@ -17,6 +17,7 @@ from webchat.providers.base import (
 from .context import CompiledContext, ContextCompiler
 from .contracts import (
     PreparationCommand,
+    PreparationCommandName,
     ReadCommandName,
     ResponseStrategy,
     TurnPlan,
@@ -121,11 +122,36 @@ def parse_planning_output(
     allowed_commands: set[str] | frozenset[str],
 ) -> TurnPlan:
     try:
-        plan = TurnPlan.from_dict(value)
+        plan = TurnPlan.from_dict(_canonicalize_command_metadata(value))
         validate_turn_plan(plan, allowed_commands=allowed_commands)
         return plan
     except (TypeError, ValueError) as exc:
         raise PlanValidationError(str(exc)) from exc
+
+
+def _canonicalize_command_metadata(value: object) -> object:
+    """Derive non-executing renderer metadata from an otherwise explicit command."""
+    if not isinstance(value, Mapping):
+        return value
+    commands = value.get("commands")
+    if not isinstance(commands, list) or not commands:
+        return value
+    names = [
+        item.get("name") if isinstance(item, Mapping) else None
+        for item in commands
+    ]
+    if any(not isinstance(name, str) for name in names):
+        return value
+    if any(name in PreparationCommandName._value2member_map_ for name in names):
+        strategy = ResponseStrategy.ACTION_PREPARED
+    else:
+        strategy = _READ_STRATEGIES.get(names[0])
+        if strategy is None:
+            return value
+    normalized = dict(value)
+    normalized["response_strategy"] = strategy.value
+    normalized["clarification_question"] = None
+    return normalized
 
 
 def validate_turn_plan(

@@ -27,6 +27,7 @@ from webchat.domain.vehicles import (
     Vehicle,
     VehicleAvailability,
     VehicleAvailabilityStatus,
+    VehicleDetails,
 )
 from webchat.domain.workshop import WorkshopBooking, WorkshopBookingDetails
 from webchat.harness.actions import (
@@ -175,6 +176,68 @@ def runtime(dealer_fake: Mock, plan: TurnPlan) -> tuple[HarnessRuntime, FakeProv
 
 
 class HarnessRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_callback_uses_neutral_reason_when_intent_is_explicit(self) -> None:
+        fake = dealer()
+        plan = TurnPlan(
+            TurnScope.IN_DOMAIN,
+            (PreparationCommand.from_mapping(
+                PreparationCommandName.PREPARE_CALLBACK,
+                {
+                    "dealership_id": "northstar-manchester",
+                    "department": "sales",
+                    "preferred_time": "2026-08-14T14:00:00+00:00",
+                },
+            ),),
+            ResponseStrategy.ACTION_PREPARED,
+        )
+        harness, _ = runtime(fake, plan)
+        state = ConversationState(
+            customer=CustomerState("Jamie", "Taylor", "jamie@example.com", "07700900123")
+        )
+
+        result = await harness.handle(TurnRequest(
+            current_input="Get Manchester sales to call me at 2pm tomorrow",
+            state=state,
+            now=NOW,
+        ))
+
+        payload = result.state.pending_action.request_payload_dict()
+        self.assertEqual(payload["reason"], "Callback request")
+        self.assertEqual(payload["department"], "sales")
+
+    async def test_sales_enquiry_infers_dealership_from_selected_vehicle(self) -> None:
+        fake = dealer()
+        fake.get_vehicle.return_value = VehicleDetails(vehicle("veh-003"), ("Large boot",))
+        plan = TurnPlan(
+            TurnScope.IN_DOMAIN,
+            (PreparationCommand.from_mapping(
+                PreparationCommandName.PREPARE_SALES_ENQUIRY,
+                {
+                    "enquiry_type": "finance",
+                    "message": "Please contact me about finance.",
+                },
+            ),),
+            ResponseStrategy.ACTION_PREPARED,
+        )
+        harness, _ = runtime(fake, plan)
+        state = ConversationState(
+            customer=CustomerState("Jamie", "Taylor", "jamie@example.com", "07700900123"),
+            entities=EntityContext(selected_vehicle_id="veh-003"),
+        )
+
+        result = await harness.handle(TurnRequest(
+            current_input="Contact me about finance on this BMW",
+            state=state,
+            now=NOW,
+        ))
+
+        self.assertEqual(
+            result.state.pending_action.request_payload_dict()["dealership_id"],
+            "northstar-manchester",
+        )
+        fake.get_vehicle.assert_awaited_once_with("veh-003")
+        fake.list_dealerships.assert_awaited_once()
+
     async def test_vehicle_search_updates_preferences_and_renders_unknown_price(self) -> None:
         fake = dealer()
         fake.search_vehicles.return_value = Page((vehicle("veh-019", price=None),), 1, 10, 1, 1)
@@ -341,6 +404,35 @@ class HarnessRuntimeTests(unittest.IsolatedAsyncioTestCase):
             {item["entity_id"] for item in actions.to_dict()["payload"]["actions"]},
             {"veh-003"},
         )
+
+    async def test_sold_interest_proposal_is_rejected_before_collecting_pii(self) -> None:
+        fake = dealer()
+        fake.get_vehicle_availability.return_value = availability(
+            VehicleAvailabilityStatus.SOLD
+        )
+        plan = TurnPlan(
+            TurnScope.IN_DOMAIN,
+            (PreparationCommand.from_mapping(
+                PreparationCommandName.PREPARE_VEHICLE_INTEREST,
+                {"vehicle_id": "veh-003"},
+            ),),
+            ResponseStrategy.ACTION_PREPARED,
+        )
+        harness, _ = runtime(fake, plan)
+
+        result = await harness.handle(TurnRequest(
+            current_input="Register interest in this sold vehicle",
+            state=ConversationState(),
+            now=NOW,
+        ))
+
+        fake.get_vehicle_availability.assert_awaited_once_with("veh-003")
+        self.assertIsNone(result.state.pending_action)
+        self.assertEqual(
+            result.blocks[0].to_dict()["payload"]["code"],
+            "vehicle_sold",
+        )
+        self.assertNotIn("customer", result.blocks[0].to_dict()["payload"]["text"].casefold())
 
     async def test_verified_workshop_lookup_issues_short_lived_booking_grant(self) -> None:
         fake = dealer()

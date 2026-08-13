@@ -262,6 +262,13 @@ def _first_state_difference(
             nested = _first_state_difference(expected_value, actual_value, key_path)
             if nested is not None:
                 return nested
+        elif (
+            key in _CASE_INSENSITIVE_STATE_FIELDS
+            and isinstance(expected_value, str)
+            and isinstance(actual_value, str)
+        ):
+            if expected_value.casefold() != actual_value.casefold():
+                return key_path, expected_value, actual_value
         elif expected_value != actual_value:
             return key_path, expected_value, actual_value
     return None
@@ -288,6 +295,18 @@ _CASE_INSENSITIVE_ARGUMENTS = frozenset(
     }
 )
 _FREE_TEXT_ARGUMENTS = frozenset({"message", "notes", "reason", "subject"})
+_CASE_INSENSITIVE_STATE_FIELDS = frozenset(
+    {"availability", "body_style", "condition", "fuel_type", "make", "transmission"}
+)
+
+
+def _same_iso_local_datetime(expected: str, actual: str) -> bool:
+    try:
+        expected_value = datetime.fromisoformat(expected)
+        actual_value = datetime.fromisoformat(actual)
+    except ValueError:
+        return expected == actual
+    return expected_value.replace(tzinfo=None) == actual_value.replace(tzinfo=None)
 
 
 def _arguments_satisfy(
@@ -304,6 +323,14 @@ def _arguments_satisfy(
         if field not in actual or actual[field] is None:
             return False
         actual_value = actual[field]
+        if (
+            field == "preferred_time"
+            and isinstance(expected_value, str)
+            and isinstance(actual_value, str)
+        ):
+            if not _same_iso_local_datetime(expected_value, actual_value):
+                return False
+            continue
         if isinstance(expected_value, dict):
             if not isinstance(actual_value, dict) or not _arguments_satisfy(
                 field,

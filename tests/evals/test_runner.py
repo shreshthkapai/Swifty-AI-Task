@@ -14,6 +14,7 @@ from evals.run import (
     ObservedTurn,
     assert_lane_parity,
     _arguments_satisfy,
+    _first_state_difference,
     run_evaluation,
     run_detailed_evaluation,
     score_turn,
@@ -32,6 +33,30 @@ CORPUS_PATH = Path(__file__).parents[2] / "evals" / "corpus.json"
 
 
 class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
+    def test_enum_like_state_values_are_compared_case_insensitively(self) -> None:
+        self.assertIsNone(
+            _first_state_difference(
+                {"preferences": {"transmission": "Automatic"}},
+                {"preferences": {"transmission": "automatic"}},
+            )
+        )
+
+    def test_callback_time_requires_the_same_explicit_clock_time(self) -> None:
+        self.assertTrue(
+            _arguments_satisfy(
+                "prepare_callback",
+                {"preferred_time": "2026-08-14T14:00:00+00:00"},
+                {"preferred_time": "2026-08-14T14:00:00"},
+            )
+        )
+        self.assertFalse(
+            _arguments_satisfy(
+                "prepare_callback",
+                {"preferred_time": "2026-08-14T14:00:00+00:00"},
+                {"preferred_time": "2026-08-15T14:00:00"},
+            )
+        )
+
     def test_free_text_wording_is_not_inferred_as_exact_from_scripted_plan(self) -> None:
         self.assertTrue(
             _arguments_satisfy(

@@ -97,6 +97,15 @@ def response_payload(plan: dict | None = None) -> dict:
 
 
 class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
+    def test_planner_guidance_uses_known_state_and_bounded_adjacent_next_steps(self) -> None:
+        from webchat.providers.openai import _PLANNER_INSTRUCTIONS
+
+        self.assertIn("already marked known", _PLANNER_INSTRUCTIONS)
+        self.assertIn("harness adds the dealership next step", _PLANNER_INSTRUCTIONS)
+        self.assertIn("Do not mention stock", _PLANNER_INSTRUCTIONS)
+        self.assertIn("lower_max_price", _PLANNER_INSTRUCTIONS)
+        self.assertIn("holiday exceptions", _PLANNER_INSTRUCTIONS)
+
     async def test_posts_stateless_strict_structured_request_and_parses_metrics(self) -> None:
         captured = []
 

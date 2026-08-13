@@ -88,7 +88,12 @@ class MultiTurnCorpusTests(unittest.TestCase):
                     f"{scenario.id}/{turn.id}",
                 )
                 rejected_locally = bool(
-                    {"invalid_phone", "missing_customer_fields", "status:cancelled"}
+                    {
+                        "invalid_phone",
+                        "missing_customer_fields",
+                        "status:cancelled",
+                        "verification_required",
+                    }
                     & set(turn.expectation.answer.required_facts)
                 )
                 self.assertEqual(

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 import json
+import re
 from typing import Any, Iterable
 
 from webchat.domain.common import require_aware
@@ -129,9 +130,15 @@ _CATALOGUE = (
             "query": _nullable("string"),
             "make": _nullable("string"),
             "model": _nullable("string"),
-            "fuel_type": _nullable("string"),
-            "transmission": _nullable("string"),
-            "body_style": _nullable("string"),
+            "fuel_type": _nullable(
+                "string", enum=["Petrol", "Diesel", "Hybrid", "Electric"]
+            ),
+            "transmission": _nullable(
+                "string", enum=["Automatic", "Manual"]
+            ),
+            "body_style": _nullable(
+                "string", enum=["SUV", "Hatchback", "Saloon", "Estate"]
+            ),
             "availability": _nullable("string", enum=["available", "reserved", "sold"]),
             **_DEALERSHIP_REFERENCE,
             "min_price_minor": _nullable("integer", minimum=0),
@@ -334,6 +341,11 @@ class ToolGate:
                 PendingActionState.FAILED,
             }
         )
+        normalized_input = current_input.casefold()
+        test_drive_without_interest = (
+            bool(DOMAIN_SIGNALS[WorkflowDomain.TEST_DRIVE].search(normalized_input))
+            and not re.search(r"\b(register|registration|interest)\b", normalized_input)
+        )
 
         included: list[IncludedCommand] = []
         excluded: list[ExcludedCommand] = []
@@ -341,6 +353,15 @@ class ToolGate:
             if pending_is_live and spec.kind is CommandKind.PREPARATION:
                 excluded.append(
                     ExcludedCommand(spec.name, ExclusionReason.PENDING_ACTION_COMPETITION)
+                )
+                continue
+            if (
+                test_drive_without_interest
+                and spec.name
+                == PreparationCommandName.PREPARE_VEHICLE_INTEREST.value
+            ):
+                excluded.append(
+                    ExcludedCommand(spec.name, ExclusionReason.UNRELATED_DOMAIN)
                 )
                 continue
             reason = self._inclusion_reason(

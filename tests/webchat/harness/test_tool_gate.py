@@ -103,6 +103,19 @@ class ToolGateTests(unittest.TestCase):
         self.assertIn("date_from", properties)
         self.assertIn("date_to", properties)
 
+    def test_vehicle_filter_schema_uses_supported_catalogue_values(self) -> None:
+        properties = command_spec("search_vehicles").argument_schema["properties"]
+
+        self.assertEqual(
+            properties["body_style"]["enum"],
+            ["SUV", "Hatchback", "Saloon", "Estate", None],
+        )
+        self.assertEqual(
+            properties["fuel_type"]["enum"],
+            ["Petrol", "Diesel", "Hybrid", "Electric", None],
+        )
+        self.assertNotIn("small", properties["body_style"]["enum"])
+
     def test_no_active_workflow_keeps_all_dealership_entry_options_visible(self) -> None:
         selection = self.gate.select(
             state=ConversationState(),
@@ -163,6 +176,17 @@ class ToolGateTests(unittest.TestCase):
         )
 
         self.assertIn("prepare_vehicle_interest", selection.included_names)
+
+    def test_clear_test_drive_intent_hides_competing_interest_preparation(self) -> None:
+        selection = self.gate.select(
+            state=ConversationState(),
+            current_input="I want to test drive this sold one anyway",
+            now=NOW,
+        )
+
+        self.assertIn("find_test_drive_slots", selection.included_names)
+        self.assertIn("check_vehicle_availability", selection.included_names)
+        self.assertNotIn("prepare_vehicle_interest", selection.included_names)
 
     def test_pending_action_removes_all_preparations_and_retains_controls(self) -> None:
         state = state_for(

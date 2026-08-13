@@ -148,6 +148,11 @@ class PolicyEngine:
         )
 
     def require_interest_eligible(self, availability: VehicleAvailability) -> None:
+        if availability.status is VehicleAvailabilityStatus.SOLD:
+            raise PolicyError(
+                PolicyCode.VEHICLE_SOLD,
+                next_steps=("sales_enquiry",),
+            )
         if not availability.can_register_interest:
             raise PolicyError(
                 PolicyCode.VEHICLE_NOT_RESERVED,

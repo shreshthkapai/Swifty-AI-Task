@@ -97,6 +97,11 @@ class PolicyEngineTests(unittest.TestCase):
         self.assertEqual(sold_error.exception.code, PolicyCode.VEHICLE_SOLD)
         self.assertEqual(sold_error.exception.next_steps, ("sales_enquiry",))
 
+        with self.assertRaises(PolicyError) as sold_interest:
+            self.policy.require_interest_eligible(sold)
+        self.assertEqual(sold_interest.exception.code, PolicyCode.VEHICLE_SOLD)
+        self.assertEqual(sold_interest.exception.next_steps, ("sales_enquiry",))
+
     def test_workshop_write_requires_active_booking_specific_grant(self) -> None:
         state = ConversationState(
             verification_grants=(VerificationGrant.issue("booking-2", now=NOW),)
