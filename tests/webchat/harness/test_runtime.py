@@ -142,7 +142,9 @@ class FakeProvider:
 
 
 def dealer() -> Mock:
-    return Mock(spec=DealerAdapter)
+    fake = Mock(spec=DealerAdapter)
+    fake.list_dealerships.return_value = (location(),)
+    return fake
 
 
 def runtime(dealer_fake: Mock, plan: TurnPlan) -> tuple[HarnessRuntime, FakeProvider]:

@@ -34,6 +34,7 @@ from .common import (
     presentation_group,
     workflow_state,
 )
+from .references import resolve_dealership_for_command
 
 
 async def execute_vehicle_read(
@@ -48,6 +49,17 @@ async def execute_vehicle_read(
 ) -> CommandOutcome | None:
     if name is ReadCommandName.SEARCH_VEHICLES:
         search_arguments = dict(arguments)
+        dealership_id, failure = await resolve_dealership_for_command(
+            dealer,
+            arguments,
+            state=state,
+            domain=WorkflowDomain.VEHICLES,
+            renderer=renderer,
+            required=False,
+        )
+        if failure is not None:
+            return failure
+        search_arguments["dealership_id"] = dealership_id
         refinement = search_arguments.pop("refinement", None)
         if refinement is not None and search_arguments.get("max_price_minor") is None:
             ceiling = await _refinement_ceiling(dealer, refinement, state)

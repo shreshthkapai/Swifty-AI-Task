@@ -109,6 +109,10 @@ D = WorkflowDomain.DEALERSHIP
 _DEPARTMENT = _nullable("string", enum=["sales", "service", "parts", "general"])
 
 _VEHICLE_ID = {"vehicle_id": _nullable("string")}
+_DEALERSHIP_REFERENCE = {
+    "dealership_id": _nullable("string"),
+    "dealership_query": _nullable("string"),
+}
 _CUSTOMER = {
     "first_name": _nullable("string"),
     "last_name": _nullable("string"),
@@ -120,7 +124,7 @@ _CATALOGUE = (
     _spec(
         ReadCommandName.SEARCH_VEHICLES,
         (V, S, T),
-        "Search dealership inventory using customer constraints; returned facts remain dealer-authoritative.",
+        "Search dealership inventory using customer constraints; use dealership_query for customer-facing location wording; returned facts remain dealer-authoritative.",
         {
             "query": _nullable("string"),
             "make": _nullable("string"),
@@ -129,7 +133,7 @@ _CATALOGUE = (
             "transmission": _nullable("string"),
             "body_style": _nullable("string"),
             "availability": _nullable("string", enum=["available", "reserved", "sold"]),
-            "dealership_id": _nullable("string"),
+            **_DEALERSHIP_REFERENCE,
             "min_price_minor": _nullable("integer", minimum=0),
             "max_price_minor": _nullable("integer", minimum=0),
             "currency": _nullable("string"),
@@ -148,16 +152,16 @@ _CATALOGUE = (
     _spec(
         ReadCommandName.FIND_TEST_DRIVE_SLOTS,
         (T,),
-        "Find current test-drive slots for an optional vehicle, dealer and date range.",
-        {**_VEHICLE_ID, "dealership_id": _nullable("string"), "date_from": _nullable("string"), "date_to": _nullable("string")},
+        "Find current test-drive slots for an optional vehicle, dealer and date range; use dealership_query for customer-facing location wording.",
+        {**_VEHICLE_ID, **_DEALERSHIP_REFERENCE, "date_from": _nullable("string"), "date_to": _nullable("string")},
     ),
     _spec(ReadCommandName.LIST_WORKSHOP_SERVICES, (W,), "List workshop service types and dealer-provided prices."),
     _spec(ReadCommandName.LIST_WORKSHOP_LOCATIONS, (W,), "List dealer locations that provide workshop services."),
     _spec(
         ReadCommandName.FIND_WORKSHOP_SLOTS,
         (W,),
-        "Find current workshop slots for a service, dealer and date range.",
-        {"dealership_id": _nullable("string"), "service_type_id": _nullable("string"), "date_from": _nullable("string"), "date_to": _nullable("string")},
+        "Find current workshop slots for a service, dealer and date range; use dealership_query for customer-facing location wording.",
+        {**_DEALERSHIP_REFERENCE, "service_type_id": _nullable("string"), "date_from": _nullable("string"), "date_to": _nullable("string")},
     ),
     _spec(
         ReadCommandName.RETRIEVE_WORKSHOP_BOOKING,
@@ -166,8 +170,8 @@ _CATALOGUE = (
         {"reference": _nullable("string"), "last_name": _nullable("string"), "registration": _nullable("string"), "phone": _nullable("string")},
     ),
     _spec(ReadCommandName.LIST_DEALERSHIPS, (D, S, T, W), "List dealership locations."),
-    _spec(ReadCommandName.GET_DEALERSHIP_DETAILS, (D,), "Get contact and location details for one dealership.", {"dealership_id": _nullable("string")}),
-    _spec(ReadCommandName.GET_DEALERSHIP_HOURS, (D,), "Get regular and holiday opening hours by department.", {"dealership_id": _nullable("string"), "department": _DEPARTMENT}),
+    _spec(ReadCommandName.GET_DEALERSHIP_DETAILS, (D,), "Get contact and location details for one dealership; use dealership_query for customer-facing location wording rather than listing first.", _DEALERSHIP_REFERENCE),
+    _spec(ReadCommandName.GET_DEALERSHIP_HOURS, (D,), "Get regular and holiday opening hours by department; use dealership_query for customer-facing location wording rather than listing first.", {**_DEALERSHIP_REFERENCE, "department": _DEPARTMENT}),
     _spec(ReadCommandName.GET_BUSINESS_INFORMATION, (D, S), "Get authoritative finance, part-exchange and privacy notices."),
     _spec(
         PreparationCommandName.PREPARE_TEST_DRIVE_BOOKING,
@@ -178,8 +182,8 @@ _CATALOGUE = (
     _spec(
         PreparationCommandName.PREPARE_SALES_ENQUIRY,
         (S,),
-        "Prepare, but never send, a vehicle or general sales enquiry.",
-        {"dealership_id": _nullable("string"), "enquiry_type": _nullable("string", enum=["general", "availability", "finance", "part_exchange"]), **_CUSTOMER, "message": _nullable("string"), **_VEHICLE_ID},
+        "Prepare, but never send, a vehicle or general sales enquiry; use dealership_query for customer-facing location wording.",
+        {**_DEALERSHIP_REFERENCE, "enquiry_type": _nullable("string", enum=["general", "availability", "finance", "part_exchange"]), **_CUSTOMER, "message": _nullable("string"), **_VEHICLE_ID},
     ),
     _spec(
         PreparationCommandName.PREPARE_VEHICLE_INTEREST,
@@ -190,14 +194,14 @@ _CATALOGUE = (
     _spec(
         PreparationCommandName.PREPARE_CALLBACK,
         (S, W, D),
-        "Prepare a dealership callback request.",
-        {"dealership_id": _nullable("string"), "department": _DEPARTMENT, **_CUSTOMER, "reason": _nullable("string"), "preferred_time": _nullable("string"), **_VEHICLE_ID},
+        "Prepare a dealership callback request; use dealership_query for customer-facing location wording.",
+        {**_DEALERSHIP_REFERENCE, "department": _DEPARTMENT, **_CUSTOMER, "reason": _nullable("string"), "preferred_time": _nullable("string"), **_VEHICLE_ID},
     ),
     _spec(
         PreparationCommandName.PREPARE_PART_EXCHANGE,
         (S,),
-        "Prepare a part-exchange valuation request.",
-        {"dealership_id": _nullable("string"), **_CUSTOMER, "registration": _nullable("string"), "mileage": _nullable("integer", minimum=0), "condition": _nullable("string", enum=["excellent", "good", "fair"])},
+        "Prepare a part-exchange valuation request; use dealership_query for customer-facing location wording.",
+        {**_DEALERSHIP_REFERENCE, **_CUSTOMER, "registration": _nullable("string"), "mileage": _nullable("integer", minimum=0), "condition": _nullable("string", enum=["excellent", "good", "fair"])},
     ),
     _spec(
         PreparationCommandName.PREPARE_WORKSHOP_BOOKING,
@@ -215,8 +219,8 @@ _CATALOGUE = (
     _spec(
         PreparationCommandName.PREPARE_DEALERSHIP_MESSAGE,
         (D,),
-        "Prepare a message to a dealership department.",
-        {"dealership_id": _nullable("string"), "department": _DEPARTMENT, "subject": _nullable("string"), "message": _nullable("string"), **_CUSTOMER, "preferred_contact_method": _nullable("string", enum=["email", "phone"])},
+        "Prepare a message to a dealership department; use dealership_query for customer-facing location wording.",
+        {**_DEALERSHIP_REFERENCE, "department": _DEPARTMENT, "subject": _nullable("string"), "message": _nullable("string"), **_CUSTOMER, "preferred_contact_method": _nullable("string", enum=["email", "phone"])},
     ),
 )
 

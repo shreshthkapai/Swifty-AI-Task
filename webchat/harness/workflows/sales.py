@@ -31,6 +31,7 @@ from .common import (
     presentation_group,
     workflow_state,
 )
+from .references import resolve_dealership_for_command
 
 
 async def execute_sales_read(
@@ -46,7 +47,16 @@ async def execute_sales_read(
     if name is not ReadCommandName.FIND_TEST_DRIVE_SLOTS:
         return None
     vehicle_id = arguments.get("vehicle_id") or state.entities.selected_vehicle_id or state.context.page_vehicle_id
-    dealership_id = arguments.get("dealership_id") or state.entities.selected_dealer_id
+    dealership_id, failure = await resolve_dealership_for_command(
+        dealer,
+        arguments,
+        state=state,
+        domain=WorkflowDomain.TEST_DRIVE,
+        renderer=renderer,
+        required=False,
+    )
+    if failure is not None:
+        return failure
     slots = await dealer.list_test_drive_slots(
         TestDriveSlotSearch(
             vehicle_id=vehicle_id,
@@ -137,7 +147,16 @@ async def execute_sales_preparation(
         )
 
     if name is PreparationCommandName.PREPARE_SALES_ENQUIRY:
-        dealership_id = arguments.get("dealership_id") or state.entities.selected_dealer_id
+        dealership_id, resolution_failure = await resolve_dealership_for_command(
+            dealer,
+            arguments,
+            state=state,
+            domain=WorkflowDomain.SALES,
+            renderer=renderer,
+            required=True,
+        )
+        if resolution_failure is not None:
+            return resolution_failure
         message = arguments.get("message")
         missing = tuple(key for key, value in (("dealership_id", dealership_id), ("message", message)) if not value)
         if missing:
@@ -179,7 +198,16 @@ async def execute_sales_preparation(
         )
 
     if name is PreparationCommandName.PREPARE_CALLBACK:
-        dealership_id = arguments.get("dealership_id") or state.entities.selected_dealer_id
+        dealership_id, resolution_failure = await resolve_dealership_for_command(
+            dealer,
+            arguments,
+            state=state,
+            domain=WorkflowDomain.DEALERSHIP,
+            renderer=renderer,
+            required=True,
+        )
+        if resolution_failure is not None:
+            return resolution_failure
         reason = arguments.get("reason")
         missing = tuple(key for key, value in (("dealership_id", dealership_id), ("reason", reason)) if not value)
         if missing:
@@ -226,7 +254,16 @@ async def execute_sales_preparation(
         return outcome
 
     if name is PreparationCommandName.PREPARE_PART_EXCHANGE:
-        dealership_id = arguments.get("dealership_id") or state.entities.selected_dealer_id
+        dealership_id, resolution_failure = await resolve_dealership_for_command(
+            dealer,
+            arguments,
+            state=state,
+            domain=WorkflowDomain.SALES,
+            renderer=renderer,
+            required=True,
+        )
+        if resolution_failure is not None:
+            return resolution_failure
         registration = arguments.get("registration") or state.customer.registration
         mileage = arguments.get("mileage")
         condition = arguments.get("condition")

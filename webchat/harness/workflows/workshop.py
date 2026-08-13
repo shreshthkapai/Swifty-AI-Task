@@ -27,6 +27,7 @@ from .common import (
     presentation_group,
     workflow_state,
 )
+from .references import resolve_dealership_for_command
 
 
 async def execute_workshop_read(
@@ -61,7 +62,16 @@ async def execute_workshop_read(
         )
 
     if name is ReadCommandName.FIND_WORKSHOP_SLOTS:
-        dealership_id = arguments.get("dealership_id") or state.entities.selected_dealer_id
+        dealership_id, failure = await resolve_dealership_for_command(
+            dealer,
+            arguments,
+            state=state,
+            domain=WorkflowDomain.WORKSHOP,
+            renderer=renderer,
+            required=False,
+        )
+        if failure is not None:
+            return failure
         service_id = arguments.get("service_type_id")
         slots = await dealer.list_workshop_slots(WorkshopSlotSearch(
             dealership_id=dealership_id, service_type_id=service_id,

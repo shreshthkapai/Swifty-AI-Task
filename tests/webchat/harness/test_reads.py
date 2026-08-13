@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
 import unittest
@@ -15,6 +16,7 @@ from webchat.harness.contracts import (
 )
 from webchat.harness.planning import TurnRequest
 from webchat.harness.state import ConversationState
+from webchat.harness.workflows.references import resolve_dealership_reference
 
 from tests.webchat.harness.test_mutations import workshop_slot
 from tests.webchat.harness.test_runtime import (
@@ -137,6 +139,59 @@ class ReadWorkflowTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(command=name):
                 result = await self._read(name, arguments, strategy, configure)
                 self.assertIn(expected_block, {block.kind for block in result.blocks})
+
+    async def test_customer_facing_dealership_reference_resolves_to_stable_id(self) -> None:
+        fake = dealer()
+        manchester = location()
+        liverpool = replace(
+            manchester,
+            id="northstar-liverpool",
+            name="Northstar Liverpool",
+            address=replace(manchester.address, town="Liverpool"),
+            phone="0151 555 0199",
+        )
+        fake.list_dealerships.return_value = (manchester, liverpool)
+        fake.get_dealership.return_value = liverpool
+        plan = TurnPlan(
+            TurnScope.IN_DOMAIN,
+            (
+                ReadCommand.from_mapping(
+                    ReadCommandName.GET_DEALERSHIP_DETAILS,
+                    {"dealership_query": "Liverpool"},
+                ),
+            ),
+            ResponseStrategy.DEALERSHIP_DETAILS,
+        )
+        harness, _ = runtime(fake, plan)
+
+        result = await harness.handle(
+            TurnRequest(
+                current_input="What's the Liverpool parts phone number?",
+                state=ConversationState(),
+                now=NOW,
+            )
+        )
+
+        fake.get_dealership.assert_awaited_once_with("northstar-liverpool")
+        self.assertEqual(
+            result.state.entities.selected_dealer_id,
+            "northstar-liverpool",
+        )
+        self.assertEqual(result.blocks[0].kind, "dealerships")
+
+    async def test_reference_resolver_does_not_guess_unknown_location(self) -> None:
+        fake = dealer()
+        fake.list_dealerships.return_value = (location(),)
+
+        resolution = await resolve_dealership_reference(
+            fake,
+            dealership_id=None,
+            dealership_query="Springfield",
+            selected_id=None,
+        )
+
+        self.assertIsNone(resolution.location)
+        self.assertEqual(resolution.candidates, (location(),))
 
 
 if __name__ == "__main__":

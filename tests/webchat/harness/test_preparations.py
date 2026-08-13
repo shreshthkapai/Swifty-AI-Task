@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import timedelta
 import unittest
 
@@ -152,6 +153,34 @@ class PreparationWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("callback_timing", {
             block.to_dict()["payload"].get("code") for block in result.blocks
         })
+
+    async def test_callback_resolves_customer_facing_dealership_reference(self) -> None:
+        from tests.webchat.harness.test_runtime import location
+
+        manchester = location()
+        liverpool = replace(
+            manchester,
+            id="northstar-liverpool",
+            name="Northstar Liverpool",
+            address=replace(manchester.address, town="Liverpool"),
+        )
+
+        _, result = await self._prepare(
+            PreparationCommandName.PREPARE_CALLBACK,
+            {
+                "dealership_query": "Liverpool",
+                "department": "parts",
+                "reason": "Parts availability",
+            },
+            configure=lambda fake: setattr(
+                fake.list_dealerships,
+                "return_value",
+                (manchester, liverpool),
+            ),
+        )
+
+        payload = result.state.pending_action.request_payload_dict()
+        self.assertEqual(payload["dealership_id"], "northstar-liverpool")
 
 
 if __name__ == "__main__":

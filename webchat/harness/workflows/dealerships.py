@@ -24,6 +24,7 @@ from .common import (
     prepare_action,
     workflow_state,
 )
+from .references import resolve_dealership_for_command
 
 
 async def execute_dealership_read(
@@ -45,9 +46,16 @@ async def execute_dealership_read(
         )
 
     if name is ReadCommandName.GET_DEALERSHIP_DETAILS:
-        dealership_id = arguments.get("dealership_id") or state.entities.selected_dealer_id
-        if not dealership_id:
-            return missing_information(state, ("dealership_id",), domain=WorkflowDomain.DEALERSHIP, renderer=renderer)
+        dealership_id, failure = await resolve_dealership_for_command(
+            dealer,
+            arguments,
+            state=state,
+            domain=WorkflowDomain.DEALERSHIP,
+            renderer=renderer,
+            required=True,
+        )
+        if failure is not None:
+            return failure
         item = await dealer.get_dealership(dealership_id)
         next_state = replace(
             workflow_state(state, domain=WorkflowDomain.DEALERSHIP, stage=WorkflowStage.COMPLETED),
@@ -56,9 +64,16 @@ async def execute_dealership_read(
         return CommandOutcome(next_state, (_locations_block((item,), renderer),))
 
     if name is ReadCommandName.GET_DEALERSHIP_HOURS:
-        dealership_id = arguments.get("dealership_id") or state.entities.selected_dealer_id
-        if not dealership_id:
-            return missing_information(state, ("dealership_id",), domain=WorkflowDomain.DEALERSHIP, renderer=renderer)
+        dealership_id, failure = await resolve_dealership_for_command(
+            dealer,
+            arguments,
+            state=state,
+            domain=WorkflowDomain.DEALERSHIP,
+            renderer=renderer,
+            required=True,
+        )
+        if failure is not None:
+            return failure
         department = enum_value(Department, arguments.get("department"), "department")
         if department is Department.GENERAL:
             department = None
@@ -113,10 +128,18 @@ async def execute_dealership_preparation(
     id_factory: Callable[[], str],
     policy: PolicyEngine,
 ) -> CommandOutcome | None:
-    del dealer
     if name is not PreparationCommandName.PREPARE_DEALERSHIP_MESSAGE:
         return None
-    dealership_id = arguments.get("dealership_id") or state.entities.selected_dealer_id
+    dealership_id, failure = await resolve_dealership_for_command(
+        dealer,
+        arguments,
+        state=state,
+        domain=WorkflowDomain.DEALERSHIP,
+        renderer=renderer,
+        required=True,
+    )
+    if failure is not None:
+        return failure
     department = enum_value(
         Department,
         arguments.get("department"),

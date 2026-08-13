@@ -266,9 +266,9 @@ class CorpusContractTests(unittest.TestCase):
                     continue
                 for command in turn.scripted_plan.commands:
                     if command.name.value == "get_dealership_hours":
-                        self.assertIn(
-                            "dealership_id",
-                            command.to_dict()["arguments"],
+                        self.assertTrue(
+                            {"dealership_id", "dealership_query"}
+                            & command.to_dict()["arguments"].keys(),
                             f"{scenario.id}/{turn.id}",
                         )
 
@@ -281,9 +281,9 @@ class CorpusContractTests(unittest.TestCase):
                     continue
                 for command in turn.scripted_plan.commands:
                     if command.name.value == "prepare_part_exchange":
-                        self.assertIn(
-                            "dealership_id",
-                            command.to_dict()["arguments"],
+                        self.assertTrue(
+                            {"dealership_id", "dealership_query"}
+                            & command.to_dict()["arguments"].keys(),
                             f"{scenario.id}/{turn.id}",
                         )
 

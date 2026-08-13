@@ -24,6 +24,7 @@ from webchat.harness.tool_gate import (
     InclusionReason,
     ToolGate,
     command_catalogue,
+    command_spec,
 )
 
 
@@ -74,6 +75,21 @@ class ToolGateTests(unittest.TestCase):
         self.assertTrue(
             all(item.argument_schema.get("additionalProperties") is False for item in catalogue)
         )
+
+    def test_dealership_bound_commands_accept_customer_facing_reference(self) -> None:
+        for name in (
+            "search_vehicles",
+            "find_test_drive_slots",
+            "find_workshop_slots",
+            "get_dealership_details",
+            "get_dealership_hours",
+            "prepare_callback",
+            "prepare_dealership_message",
+        ):
+            with self.subTest(command=name):
+                properties = command_spec(name).argument_schema["properties"]
+                self.assertIn("dealership_query", properties)
+                self.assertIn("customer-facing", command_spec(name).description)
 
     def test_no_active_workflow_keeps_all_dealership_entry_options_visible(self) -> None:
         selection = self.gate.select(
