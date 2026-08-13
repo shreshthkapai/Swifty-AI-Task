@@ -74,18 +74,32 @@ database. Runtime configuration uses `NORTHSTAR_BASE_URL` and the server-side
 
 ## Reviewer verification
 
-Run the authored unit, integration, API, adapter, and conversational tests together with the
-supplied dealership-platform tests:
+Run the authored tests, supplied dealership-platform tests, and all 60 scripted conversation
+scenarios through the real harness runtime:
 
 ```bash
 python -m evals.verify
 ```
 
-The command prints dense suite statistics and writes a sanitized machine-readable report to
-`artifacts/evals/reviewer-report.json`. Generated reports are gitignored. Selected assignment
-edge cases and their actual deterministic harness outputs over hermetic dealer fixtures are
-committed in [`evals/examples.json`](./evals/examples.json); inspect one without running the
-suites using:
+The default is deterministic and needs no model API key. It exits non-zero when any test or corpus
+turn fails and writes every turn—including expectations, actual blocks, commands, state changes,
+side effects, usage, and first divergence—to the gitignored
+`artifacts/evals/reviewer-report.json`. Focus a run with:
+
+```bash
+python -m evals.verify --only authored
+python -m evals.verify --only platform
+python -m evals.verify --only corpus
+python -m evals.verify --only corpus --scenario sales-02
+```
+
+Run the probabilistic, billable planner lane explicitly with
+`python -m evals.verify --only corpus --lane live-provider`; it reads `OPENAI_API_KEY`,
+`CHAT_MODEL`, and optional provider settings from the environment or root `.env` while retaining
+the same dealer fixtures, clock, runtime, corpus, and scorer.
+
+Selected assignment edge cases and their deterministic harness outputs are also committed in
+[`evals/examples.json`](./evals/examples.json). Inspect one without running any suite using:
 
 ```bash
 python -m evals.verify --example stale-test-drive-slot

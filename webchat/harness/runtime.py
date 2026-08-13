@@ -18,6 +18,7 @@ from .contracts import (
     ReadCommand,
     ReadCommandName,
     ResponseStrategy,
+    TurnScope,
 )
 from .planning import PlanningEngine, TurnRequest
 from .policy import PolicyEngine
@@ -127,6 +128,12 @@ class HarnessRuntime:
 
         state = self._supersede_for_switch(turn_state, plan.commands)
         blocks: list[MessageBlock] = []
+        if (
+            plan.scope is TurnScope.MIXED
+            and plan.adjacent_advice is not None
+            and self._policy.is_safe_adjacent_advice(plan.adjacent_advice)
+        ):
+            blocks.append(self._renderer.text(plan.adjacent_advice))
         executed: list[str] = []
         for command in plan.commands:
             executed.append(command.name.value)

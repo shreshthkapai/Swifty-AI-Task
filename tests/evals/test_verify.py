@@ -6,18 +6,94 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from evals.verify import (
     SuiteResult,
     SuiteSpec,
     build_report,
     load_examples,
+    main,
     parse_unittest_summary,
     run_suite,
 )
 
 
 class ReviewerVerificationTests(unittest.TestCase):
+    def test_focused_corpus_run_writes_every_executed_turn(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.json"
+
+            exit_code = main(
+                (
+                    "--only",
+                    "corpus",
+                    "--scenario",
+                    "scope-01",
+                    "--output",
+                    str(output),
+                )
+            )
+            report = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["schema_version"], 2)
+        self.assertTrue(report["corpus_run"]["partial"])
+        self.assertEqual(report["corpus_run"]["executed_scenarios"], 1)
+        self.assertEqual(report["corpus_run"]["executed_turns"], 1)
+        self.assertEqual(report["corpus_run"]["turns"][0]["scenario_id"], "scope-01")
+
+    def test_unknown_corpus_scenario_is_rejected_without_writing_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.json"
+
+            exit_code = main(
+                (
+                    "--only",
+                    "corpus",
+                    "--scenario",
+                    "missing-scenario",
+                    "--output",
+                    str(output),
+                )
+            )
+
+            self.assertEqual(exit_code, 2)
+            self.assertFalse(output.exists())
+
+    def test_complete_corpus_only_run_is_not_labelled_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.json"
+
+            exit_code = main(
+                ("--only", "corpus", "--output", str(output))
+            )
+            report = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(report["corpus_run"]["partial"])
+        self.assertEqual(report["corpus_run"]["executed_scenarios"], 60)
+
+    def test_live_provider_lane_fails_closed_without_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.json"
+            with patch("evals.verify._local_environment", return_value={}):
+                exit_code = main(
+                    (
+                        "--only",
+                        "corpus",
+                        "--lane",
+                        "live-provider",
+                        "--scenario",
+                        "scope-01",
+                        "--output",
+                        str(output),
+                    )
+                )
+
+            self.assertEqual(exit_code, 2)
+            self.assertFalse(output.exists())
+
     def test_committed_examples_cover_assignment_risks_and_preserve_utf8(self) -> None:
         path = Path(__file__).parents[2] / "evals" / "examples.json"
 

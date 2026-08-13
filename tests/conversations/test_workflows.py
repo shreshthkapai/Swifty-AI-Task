@@ -54,7 +54,7 @@ class MultiTurnCorpusTests(unittest.TestCase):
                     self.assertEqual(turn.input.value, "confirm", scenario.id)
                     self.assertEqual(turn.expectation.max_model_calls, 0, scenario.id)
 
-    def test_every_prepared_action_is_pending_and_cannot_write(self) -> None:
+    def test_preparation_cannot_write_and_valid_preparation_is_pending(self) -> None:
         mutation_by_command = {
             "prepare_test_drive_booking": "test_drive_booking",
             "prepare_sales_enquiry": "sales_enquiry",
@@ -77,11 +77,6 @@ class MultiTurnCorpusTests(unittest.TestCase):
                     if command.name.value.startswith("prepare_")
                 )
                 mutation = mutation_by_command[preparation.name.value]
-                self.assertEqual(
-                    turn.expectation.expected_state.get("pending_action"),
-                    mutation,
-                    f"{scenario.id}/{turn.id}",
-                )
                 self.assertIn(
                     mutation,
                     turn.expectation.prohibited_mutations,
@@ -90,6 +85,15 @@ class MultiTurnCorpusTests(unittest.TestCase):
                 self.assertEqual(
                     turn.expectation.side_effects,
                     (),
+                    f"{scenario.id}/{turn.id}",
+                )
+                rejected_locally = bool(
+                    {"invalid_phone", "missing_customer_fields", "status:cancelled"}
+                    & set(turn.expectation.answer.required_facts)
+                )
+                self.assertEqual(
+                    turn.expectation.expected_state.get("pending_action"),
+                    None if rejected_locally else mutation,
                     f"{scenario.id}/{turn.id}",
                 )
 

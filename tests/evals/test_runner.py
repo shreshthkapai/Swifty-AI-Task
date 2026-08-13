@@ -3,6 +3,8 @@ from pathlib import Path
 import unittest
 
 from evals.run import (
+    DetailedEvaluationReport,
+    EvaluatedTurn,
     EvaluationLane,
     EvaluationReport,
     FailureCategory,
@@ -11,6 +13,7 @@ from evals.run import (
     ObservedTurn,
     assert_lane_parity,
     run_evaluation,
+    run_detailed_evaluation,
     score_turn,
 )
 from evals.schema import load_corpus
@@ -27,6 +30,34 @@ CORPUS_PATH = Path(__file__).parents[2] / "evals" / "corpus.json"
 
 
 class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
+    async def test_detailed_run_retains_each_input_observation_and_score(self) -> None:
+        corpus = load_corpus(CORPUS_PATH)
+        one = type(corpus)(
+            corpus_version=corpus.corpus_version,
+            fixture_version=corpus.fixture_version,
+            scoring_version=corpus.scoring_version,
+            scenarios=(corpus.scenarios[0],),
+        )
+
+        report = await run_detailed_evaluation(
+            one,
+            NoOpConversationDriver(),
+            lane=LaneKind.SCRIPTED,
+        )
+
+        self.assertIsInstance(report, DetailedEvaluationReport)
+        self.assertEqual(len(report.records), len(one.scenarios[0].turns))
+        record = report.records[0]
+        self.assertIsInstance(record, EvaluatedTurn)
+        self.assertEqual(record.scenario_id, one.scenarios[0].id)
+        self.assertEqual(record.category, one.scenarios[0].category)
+        self.assertEqual(record.input, one.scenarios[0].turns[0].input)
+        self.assertIsNone(record.observed.answer)
+        self.assertFalse(record.score.passed)
+        self.assertEqual(record.score.divergence.path, "answer.missing")
+        self.assertEqual(report.failed_turns, len(report.records))
+        self.assertEqual(report.category_counts(), {one.scenarios[0].category: {"passed": 0, "failed": len(report.records)}})
+
     async def test_no_op_chatbot_fails_every_corpus_turn(self) -> None:
         corpus = load_corpus(CORPUS_PATH)
 
@@ -135,7 +166,7 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "make": "BMW",
                         "transmission": "Automatic",
-                        "max_price_pence": 3_500_000,
+                        "max_price_minor": 3_500_000,
                     },
                 ),
             ),
@@ -143,7 +174,7 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
                 "preferences": {
                     "make": "BMW",
                     "transmission": "Automatic",
-                    "max_price_pence": 3_000_000,
+                    "max_price_minor": 3_000_000,
                 }
             },
             model_calls=1,
@@ -165,11 +196,11 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
             result.divergence.expected,
             {
                 "make": "BMW",
-                "max_price_pence": 3_000_000,
+                "max_price_minor": 3_000_000,
                 "transmission": "Automatic",
             },
         )
-        self.assertEqual(result.divergence.actual["max_price_pence"], 3_500_000)
+        self.assertEqual(result.divergence.actual["max_price_minor"], 3_500_000)
 
     def test_lane_parity_allows_only_planning_source_to_differ(self) -> None:
         common = {

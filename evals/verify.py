@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import re
@@ -16,7 +17,14 @@ import sys
 import time
 from typing import Any, Mapping, Sequence
 
+import httpx
+
+from evals.driver import ProviderConversationDriver, ScriptedConversationDriver
+from evals.fixtures import FixtureRegistry
+from evals.reporting import detailed_report_data, write_report_atomic
+from evals.run import DetailedEvaluationReport, LaneKind, run_detailed_evaluation
 from evals.schema import Corpus, load_corpus
+from webchat.providers.openai import OpenAIPlanningProvider, OpenAIProviderConfig
 
 
 REPORT_SCHEMA_VERSION = 1
@@ -25,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CORPUS_PATH = ROOT / "evals" / "corpus.json"
 DEFAULT_EXAMPLES_PATH = ROOT / "evals" / "examples.json"
 DEFAULT_REPORT_PATH = ROOT / "artifacts" / "evals" / "reviewer-report.json"
+EVALUATION_CLOCK = datetime(2026, 8, 13, 12, tzinfo=UTC)
 
 _RAN_PATTERN = re.compile(r"Ran (\d+) tests? in [0-9.]+s")
 _COUNT_PATTERN = re.compile(r"(failures|errors|skipped)=(\d+)")
@@ -287,15 +296,79 @@ def _suite_specs() -> tuple[SuiteSpec, ...]:
     )
 
 
-def _write_json(path: Path, value: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+def _select_corpus(corpus: Corpus, scenario_id: str | None) -> Corpus:
+    if scenario_id is None:
+        return corpus
+    scenarios = tuple(item for item in corpus.scenarios if item.id == scenario_id)
+    if not scenarios:
+        raise ValueError(f"unknown corpus scenario: {scenario_id}")
+    return Corpus(
+        corpus_version=corpus.corpus_version,
+        fixture_version=corpus.fixture_version,
+        scoring_version=corpus.scoring_version,
+        scenarios=scenarios,
+        schema_version=corpus.schema_version,
+    )
+
+
+def _local_environment() -> dict[str, str]:
+    values: dict[str, str] = {}
+    path = ROOT / ".env"
+    if path.exists():
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip('"').strip("'")
+    values.update(os.environ)
+    return values
+
+
+async def _run_corpus(corpus: Corpus, lane: LaneKind) -> DetailedEvaluationReport:
+    registry = FixtureRegistry(now=EVALUATION_CLOCK)
+    if lane is LaneKind.SCRIPTED:
+        return await run_detailed_evaluation(
+            corpus,
+            ScriptedConversationDriver(registry),
+            lane=lane,
+        )
+
+    values = _local_environment()
+    api_key = values.get("OPENAI_API_KEY", "").strip()
+    model = values.get("CHAT_MODEL", "").strip()
+    if not api_key or not model:
+        raise ValueError(
+            "live-provider lane requires OPENAI_API_KEY and CHAT_MODEL in the environment or .env"
+        )
+    async with httpx.AsyncClient() as client:
+        provider = OpenAIPlanningProvider(
+            client,
+            OpenAIProviderConfig(
+                api_key=api_key,
+                model=model,
+                base_url=values.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+                timeout_seconds=float(values.get("CHAT_PROVIDER_TIMEOUT_SECONDS", "20")),
+            ),
+        )
+        driver = ProviderConversationDriver(registry, lambda: provider)
+        return await run_detailed_evaluation(corpus, driver, lane=lane)
+
+
+def _empty_evaluation(corpus: Corpus, lane: LaneKind) -> DetailedEvaluationReport:
+    return DetailedEvaluationReport(
+        corpus_version=corpus.corpus_version,
+        fixture_version=corpus.fixture_version,
+        scoring_version=corpus.scoring_version,
+        lane=lane,
+        records=(),
     )
 
 
 def _print_summary(report: Mapping[str, Any], output_path: Path) -> None:
+    if "corpus_run" in report:
+        _print_detailed_summary(report, output_path)
+        return
     print("Northstar reviewer verification")
     for suite in report["suites"]:
         status = "PASS" if suite["passed"] else "FAIL"
@@ -312,6 +385,36 @@ def _print_summary(report: Mapping[str, Any], output_path: Path) -> None:
     print(f"JSON  {output_path.relative_to(ROOT)}")
 
 
+def _print_detailed_summary(report: Mapping[str, Any], output_path: Path) -> None:
+    print("Northstar reviewer verification")
+    for suite in report["suites"]:
+        status = "PASS" if suite["passed"] else "FAIL"
+        print(
+            f"{status:4} {suite['name']}: {suite['tests']} tests, "
+            f"{suite['failures']} failures, {suite['errors']} errors, "
+            f"{suite['duration_ms'] / 1000:.2f}s"
+        )
+    corpus = report["corpus_run"]
+    if corpus["executed_scenarios"]:
+        status = "PASS" if corpus["failed_turns"] == 0 else "FAIL"
+        print(
+            f"{status:4} corpus ({corpus['lane']}): "
+            f"{corpus['executed_scenarios']}/{corpus['defined_scenarios']} scenarios, "
+            f"{corpus['passed_turns']}/{corpus['executed_turns']} turns"
+        )
+    tests = sum(item["tests"] for item in report["suites"])
+    print(
+        f"TOTAL {tests} tests; {corpus['executed_scenarios']}/"
+        f"{corpus['defined_scenarios']} scenarios; "
+        f"{corpus['executed_turns']} evaluated turns"
+    )
+    try:
+        shown_path = output_path.relative_to(ROOT)
+    except ValueError:
+        shown_path = output_path
+    print(f"JSON  {shown_path}")
+
+
 def _print_example(examples: Mapping[str, Any], example_id: str) -> int:
     match = next((item for item in examples["examples"] if item["id"] == example_id), None)
     if match is None:
@@ -326,27 +429,57 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--example", metavar="ID")
+    parser.add_argument("--only", choices=("authored", "platform", "corpus"))
+    parser.add_argument("--scenario", metavar="ID")
+    parser.add_argument(
+        "--lane",
+        choices=tuple(item.value for item in LaneKind),
+        default=LaneKind.SCRIPTED.value,
+    )
     args = parser.parse_args(argv)
 
-    examples_bytes = DEFAULT_EXAMPLES_PATH.read_bytes()
-    examples = load_examples(DEFAULT_EXAMPLES_PATH)
     if args.example:
-        return _print_example(examples, args.example)
+        return _print_example(load_examples(DEFAULT_EXAMPLES_PATH), args.example)
 
-    suites = tuple(run_suite(spec) for spec in _suite_specs())
-    report = build_report(
+    full_corpus = load_corpus(DEFAULT_CORPUS_PATH)
+    lane = LaneKind(args.lane)
+    run_corpus = args.only in {None, "corpus"}
+    if args.scenario and not run_corpus:
+        print("--scenario requires the corpus lane", file=sys.stderr)
+        return 2
+    try:
+        selected_corpus = _select_corpus(full_corpus, args.scenario)
+        evaluation = (
+            asyncio.run(_run_corpus(selected_corpus, lane))
+            if run_corpus
+            else _empty_evaluation(full_corpus, lane)
+        )
+    except (OSError, ValueError) as exc:
+        print(f"Cannot run corpus: {exc}", file=sys.stderr)
+        return 2
+
+    selected_suite_names = {
+        None: {"authored", "supplied-platform"},
+        "authored": {"authored"},
+        "platform": {"supplied-platform"},
+        "corpus": set(),
+    }[args.only]
+    suites = tuple(
+        run_suite(spec) for spec in _suite_specs() if spec.name in selected_suite_names
+    )
+    report = detailed_report_data(
+        evaluation=evaluation,
         suites=suites,
-        examples=examples,
-        examples_sha256=hashlib.sha256(examples_bytes).hexdigest(),
         evaluated_commit=_git_commit(),
         generated_at=datetime.now(UTC),
         python_version=platform.python_version(),
-        corpus_metadata=corpus_metadata(load_corpus(DEFAULT_CORPUS_PATH)),
+        total_scenarios=len(full_corpus.scenarios),
+        partial=args.scenario is not None or args.only in {"authored", "platform"},
     )
     output_path = args.output if args.output.is_absolute() else ROOT / args.output
-    _write_json(output_path, report)
+    write_report_atomic(output_path, report)
     _print_summary(report, output_path)
-    return 0 if report["totals"]["passed"] else 1
+    return 0 if report["passed"] else 1
 
 
 if __name__ == "__main__":

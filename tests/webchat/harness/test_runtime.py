@@ -445,6 +445,27 @@ class HarnessRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.executed_commands, ("search_vehicles", "get_dealership_hours"))
         self.assertEqual({block.kind for block in result.blocks}, {"vehicle_cards", "opening_hours"})
 
+    async def test_safe_mixed_advice_is_rendered_before_fresh_dealer_results(self) -> None:
+        fake = dealer()
+        fake.search_vehicles.return_value = Page((vehicle(),), 1, 10, 1, 1)
+        advice = "Compare rear-seat space, boot capacity, safety equipment and running costs."
+        plan = TurnPlan(
+            TurnScope.MIXED,
+            (ReadCommand.from_mapping(ReadCommandName.SEARCH_VEHICLES, {"body_style": "SUV"}),),
+            ResponseStrategy.SEARCH_RESULTS,
+            adjacent_advice=advice,
+        )
+        harness, _ = runtime(fake, plan)
+
+        result = await harness.handle(TurnRequest(
+            current_input="What should I look for in a family car, and show suitable stock?",
+            state=ConversationState(),
+            now=NOW,
+        ))
+
+        self.assertEqual([block.kind for block in result.blocks], ["text", "vehicle_cards"])
+        self.assertEqual(result.blocks[0].to_dict()["payload"]["text"], advice)
+
     async def test_live_page_vehicle_is_used_and_verified_by_dealer_read(self) -> None:
         fake = dealer()
         from webchat.domain.vehicles import VehicleDetails

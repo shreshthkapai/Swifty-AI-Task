@@ -9,7 +9,7 @@ from enum import StrEnum
 import math
 from typing import Any, Protocol
 
-from evals.schema import Corpus, CorpusTurn, Scenario
+from evals.schema import Corpus, CorpusTurn, Scenario, TurnExpectation, TurnInput
 from webchat.harness.contracts import HarnessCommand, PreparationCommand, ReadCommand
 
 
@@ -90,6 +90,8 @@ class ObservedTurn:
     answer: ObservedAnswer | None = None
     provider_failure: str | None = None
     adapter_failure: str | None = None
+    blocks: tuple[dict[str, Any], ...] = ()
+    state_changes: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.commands, tuple) or not all(
@@ -171,6 +173,45 @@ class EvaluationReport:
             if result.divergence is not None
         )
         return dict(sorted(counts.items()))
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluatedTurn:
+    scenario_id: str
+    category: str
+    title: str
+    input: TurnInput
+    expectation: TurnExpectation
+    observed: ObservedTurn
+    score: TurnScore
+
+
+@dataclass(frozen=True, slots=True)
+class DetailedEvaluationReport:
+    corpus_version: str
+    fixture_version: str
+    scoring_version: str
+    lane: LaneKind
+    records: tuple[EvaluatedTurn, ...]
+
+    @property
+    def total_turns(self) -> int:
+        return len(self.records)
+
+    @property
+    def passed_turns(self) -> int:
+        return sum(record.score.passed for record in self.records)
+
+    @property
+    def failed_turns(self) -> int:
+        return self.total_turns - self.passed_turns
+
+    def category_counts(self) -> dict[str, dict[str, int]]:
+        categories: dict[str, dict[str, int]] = {}
+        for record in self.records:
+            counts = categories.setdefault(record.category, {"passed": 0, "failed": 0})
+            counts["passed" if record.score.passed else "failed"] += 1
+        return dict(sorted(categories.items()))
 
 
 class ConversationDriver(Protocol):
@@ -465,4 +506,36 @@ async def run_evaluation(
         corpus_version=corpus.corpus_version,
         scoring_version=corpus.scoring_version,
         results=tuple(results),
+    )
+
+
+async def run_detailed_evaluation(
+    corpus: Corpus,
+    driver: ConversationDriver,
+    *,
+    lane: LaneKind,
+) -> DetailedEvaluationReport:
+    if not isinstance(lane, LaneKind):
+        raise ValueError("lane must be a LaneKind")
+    records: list[EvaluatedTurn] = []
+    for scenario in corpus.scenarios:
+        for turn in scenario.turns:
+            observed = await driver.execute_turn(scenario, turn)
+            records.append(
+                EvaluatedTurn(
+                    scenario_id=scenario.id,
+                    category=scenario.category,
+                    title=scenario.title,
+                    input=turn.input,
+                    expectation=turn.expectation,
+                    observed=observed,
+                    score=score_turn(scenario.id, turn, observed),
+                )
+            )
+    return DetailedEvaluationReport(
+        corpus_version=corpus.corpus_version,
+        fixture_version=corpus.fixture_version,
+        scoring_version=corpus.scoring_version,
+        lane=lane,
+        records=tuple(records),
     )
