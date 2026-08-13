@@ -8,6 +8,8 @@ from webchat.harness.context import ContextCompiler
 from webchat.harness.state import ConversationState
 from webchat.harness.tool_gate import ToolGate
 from webchat.providers.base import (
+    PlanningOutputError,
+    PlanningOutputErrorKind,
     PlanningProviderError,
     PlanningRequest,
     ProviderErrorKind,
@@ -200,8 +202,11 @@ class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
                 ],
             },
         )
-        expected = (ProviderErrorKind.INVALID_RESPONSE, ProviderErrorKind.REFUSAL)
-        for payload, kind in zip(payloads, expected, strict=True):
+        expected = (
+            (PlanningOutputError, PlanningOutputErrorKind.INVALID_JSON),
+            (PlanningProviderError, ProviderErrorKind.REFUSAL),
+        )
+        for payload, (error_type, kind) in zip(payloads, expected, strict=True):
             with self.subTest(kind=kind):
                 async def handler(_: httpx.Request, payload=payload) -> httpx.Response:
                     return httpx.Response(200, json=payload)
@@ -211,10 +216,35 @@ class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
                         client,
                         OpenAIProviderConfig(api_key="key", model="gpt-test"),
                     )
-                    with self.assertRaises(PlanningProviderError) as raised:
+                    with self.assertRaises(error_type) as raised:
                         await provider.plan(planning_request())
                 self.assertIs(raised.exception.kind, kind)
-                self.assertFalse(raised.exception.retryable)
+
+    async def test_well_formed_invalid_plan_is_a_safe_planner_failure(self) -> None:
+        payload = response_payload(
+            {
+                "schema_version": 1,
+                "scope": "in_domain",
+                "commands": [],
+                "response_strategy": "search_results",
+                "clarification_question": None,
+                "adjacent_advice": None,
+            }
+        )
+
+        async def handler(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=payload)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = OpenAIPlanningProvider(
+                client,
+                OpenAIProviderConfig(api_key="key", model="gpt-test"),
+            )
+            with self.assertRaises(PlanningOutputError) as raised:
+                await provider.plan(planning_request())
+
+        self.assertIs(raised.exception.kind, PlanningOutputErrorKind.INVALID_PLAN)
+        self.assertEqual(str(raised.exception), "invalid_plan")
 
     async def test_timeout_and_http_status_map_without_leaking_response_text(self) -> None:
         cases = (

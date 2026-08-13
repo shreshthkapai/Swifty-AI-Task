@@ -4,12 +4,26 @@ import unittest
 from evals.driver import ProviderConversationDriver, ScriptedConversationDriver
 from evals.fixtures import FixtureRegistry
 from evals.schema import Corpus, load_corpus
+from webchat.providers.base import PlanningOutputError, PlanningOutputErrorKind
 
 
 NOW = datetime(2026, 8, 13, 12, tzinfo=UTC)
 
 
 class ScriptedConversationDriverTests(unittest.IsolatedAsyncioTestCase):
+    async def test_planner_output_error_is_captured_separately(self) -> None:
+        scenario = load_corpus("evals/corpus.json").scenarios[0]
+
+        class Provider:
+            async def plan(self, request):
+                raise PlanningOutputError(PlanningOutputErrorKind.INVALID_PLAN)
+
+        driver = ProviderConversationDriver(FixtureRegistry(now=NOW), Provider)
+
+        observed = await driver.execute_turn(scenario, scenario.turns[0])
+
+        self.assertEqual(observed.planner_failure, "invalid_plan")
+        self.assertIsNone(observed.provider_failure)
     async def test_provider_lane_observes_the_providers_actual_plan(self) -> None:
         scenario = load_corpus("evals/corpus.json").scenarios[0]
 

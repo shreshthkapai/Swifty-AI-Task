@@ -18,9 +18,11 @@ from webchat.harness.contracts import (
     TURN_PLAN_SCHEMA_VERSION,
     TurnScope,
 )
-from webchat.harness.planning import parse_planning_output
+from webchat.harness.planning import PlanValidationError, parse_planning_output
 
 from .base import (
+    PlanningOutputError,
+    PlanningOutputErrorKind,
     PlanningProviderError,
     PlanningRequest,
     PlanningResult,
@@ -38,7 +40,12 @@ Use only the semantic commands present in the request context and schema.
 Commands retrieve facts or prepare an action; they never execute mutations.
 Never invent dealership facts. Ask one concise clarification when required data is missing.
 Classify useful general car advice as dealership-adjacent. For mixed requests, retain the
-dealership portion without answering unrelated trivia. Return only the required JSON plan."""
+dealership portion without answering unrelated trivia.
+Use dealership_query for customer-facing location wording when no stable dealership ID is in context.
+Choose the semantic intent even when its deterministic handler must collect or resolve missing fields.
+Do not add prerequisite reads that the semantic command description says its handler owns.
+Emit at most one preparation command and use action_prepared whenever a preparation is present.
+Return only the required JSON plan."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +132,7 @@ class OpenAIPlanningProvider:
         try:
             payload = response.json()
             return self._parse_response(payload, request=request, latency_ms=elapsed_ms)
-        except PlanningProviderError:
+        except (PlanningProviderError, PlanningOutputError):
             raise
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise PlanningProviderError(
@@ -184,11 +191,21 @@ class OpenAIPlanningProvider:
             raise PlanningProviderError(ProviderErrorKind.REFUSAL, retryable=False)
         if len(texts) != 1:
             raise ValueError("response must contain exactly one output_text item")
-        plan_data = json.loads(texts[0])
-        plan = parse_planning_output(
-            plan_data,
-            allowed_commands={item.name for item in request.commands},
-        )
+        try:
+            plan_data = json.loads(texts[0])
+        except json.JSONDecodeError as exc:
+            raise PlanningOutputError(
+                PlanningOutputErrorKind.INVALID_JSON
+            ) from exc
+        try:
+            plan = parse_planning_output(
+                plan_data,
+                allowed_commands={item.name for item in request.commands},
+            )
+        except PlanValidationError as exc:
+            raise PlanningOutputError(
+                PlanningOutputErrorKind.INVALID_PLAN
+            ) from exc
         usage = _parse_usage(value.get("usage"))
         model = value.get("model")
         if not isinstance(model, str) or not model.strip():

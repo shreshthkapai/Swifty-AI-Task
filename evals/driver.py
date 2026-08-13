@@ -14,6 +14,8 @@ from webchat.harness.planning import PlanValidationError, PlanningEngine, TurnRe
 from webchat.harness.runtime import HarnessRuntime, TurnResult
 from webchat.harness.state import ActionReference, ConversationState, PageContext
 from webchat.providers.base import (
+    PlanningOutputError,
+    PlanningOutputErrorKind,
     PlanningProvider,
     PlanningProviderError,
     PlanningRequest,
@@ -128,7 +130,13 @@ class ProviderConversationDriver:
         )
         try:
             result = await session.runtime.handle(request)
-        except (PlanningProviderError, PlanValidationError) as exc:
+        except PlanningOutputError as exc:
+            return ObservedTurn(planner_failure=exc.kind.value)
+        except PlanValidationError:
+            return ObservedTurn(
+                planner_failure=PlanningOutputErrorKind.INVALID_PLAN.value
+            )
+        except PlanningProviderError as exc:
             failure = getattr(exc, "kind", type(exc).__name__)
             return ObservedTurn(provider_failure=str(failure))
         session.state = result.state

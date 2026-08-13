@@ -100,6 +100,21 @@ class ProviderErrorKind(StrEnum):
     REFUSAL = "refusal"
 
 
+class PlanningOutputErrorKind(StrEnum):
+    INVALID_JSON = "invalid_json"
+    INVALID_PLAN = "invalid_plan"
+
+
+class PlanningOutputError(Exception):
+    """Safe classification for model output that cannot become a TurnPlan."""
+
+    def __init__(self, kind: PlanningOutputErrorKind) -> None:
+        if not isinstance(kind, PlanningOutputErrorKind):
+            raise TypeError("kind must be a PlanningOutputErrorKind")
+        self.kind = kind
+        super().__init__(kind.value)
+
+
 class PlanningProviderError(Exception):
     def __init__(self, kind: ProviderErrorKind, *, retryable: bool) -> None:
         if not isinstance(kind, ProviderErrorKind):

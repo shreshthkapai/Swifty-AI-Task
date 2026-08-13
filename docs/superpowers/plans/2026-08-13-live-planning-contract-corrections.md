@@ -54,7 +54,7 @@ Expected: failure because `_arguments_satisfy` does not exist and raw frozen arg
 
 - [ ] **Step 3: Implement required-subset comparison**
 
-Drop null-valued actual properties for comparison, recursively require every expected key, and case-fold only the named semantic filter fields (`make`, `model`, `fuel_type`, `transmission`, `body_style`, `availability`, `currency`, `sort`, `refinement`, `department`, `enquiry_type`, and `condition`). Keep IDs, free text, dates, contact fields and amounts exact. Replace the raw equality check in `_score_turn` with this helper. Do not change answer, state, call, mutation, or side-effect scoring.
+Drop null-valued actual properties for comparison, recursively require every expected structured key, and case-fold only the named semantic filter fields (`make`, `model`, `fuel_type`, `transmission`, `body_style`, `availability`, `currency`, `sort`, `refinement`, `department`, `enquiry_type`, and `condition`). Keep IDs, dates, contact fields and amounts exact. Do not infer byte-exact message, subject, reason or notes expectations from scripted planner fixtures; customer-visible confirmation facts score those fields. Replace the raw equality check in `_score_turn` with this helper. Do not change answer, state, call, mutation, or side-effect scoring.
 
 - [ ] **Step 4: Verify GREEN and focused live improvement**
 

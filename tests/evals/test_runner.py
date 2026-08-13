@@ -13,6 +13,7 @@ from evals.run import (
     ObservedAnswer,
     ObservedTurn,
     assert_lane_parity,
+    _arguments_satisfy,
     run_evaluation,
     run_detailed_evaluation,
     score_turn,
@@ -31,6 +32,30 @@ CORPUS_PATH = Path(__file__).parents[2] / "evals" / "corpus.json"
 
 
 class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
+    def test_free_text_wording_is_not_inferred_as_exact_from_scripted_plan(self) -> None:
+        self.assertTrue(
+            _arguments_satisfy(
+                "prepare_dealership_message",
+                {
+                    "dealership_query": "Stockport",
+                    "department": "service",
+                    "message": "I will be ten minutes late.",
+                },
+                {
+                    "dealership_query": "Stockport",
+                    "department": "service",
+                    "message": "I'll be ten minutes late.",
+                    "subject": "Running late",
+                },
+            )
+        )
+        self.assertFalse(
+            _arguments_satisfy(
+                "prepare_dealership_message",
+                {"dealership_query": "Stockport", "department": "service"},
+                {"dealership_query": "Bolton", "department": "service"},
+            )
+        )
     async def test_detailed_run_retains_each_input_observation_and_score(self) -> None:
         corpus = load_corpus(CORPUS_PATH)
         one = type(corpus)(
@@ -132,6 +157,19 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.divergence.category, FailureCategory.PROVIDER_FAILURE)
         self.assertEqual(result.divergence.path, "provider")
+
+    def test_planner_output_failure_is_not_provider_transport(self) -> None:
+        corpus = load_corpus(CORPUS_PATH)
+        turn = corpus.scenarios[0].turns[0]
+
+        result = score_turn(
+            corpus.scenarios[0].id,
+            turn,
+            ObservedTurn(planner_failure="invalid_plan"),
+        )
+
+        self.assertEqual(result.divergence.category, FailureCategory.PLANNER_FAILURE)
+        self.assertEqual(result.divergence.path, "planner")
 
     def test_missing_required_adapter_call_is_scored_separately_from_command(self) -> None:
         corpus = load_corpus(CORPUS_PATH)

@@ -16,6 +16,7 @@ from webchat.harness.contracts import HarnessCommand, PreparationCommand, ReadCo
 class FailureCategory(StrEnum):
     MODEL_REASONING = "MODEL_REASONING"
     PROVIDER_FAILURE = "PROVIDER_FAILURE"
+    PLANNER_FAILURE = "PLANNER_FAILURE"
     CONTEXT_MISSING = "CONTEXT_MISSING"
     BAD_TOOL_SCHEMA = "BAD_TOOL_SCHEMA"
     STATE_ERROR = "STATE_ERROR"
@@ -89,6 +90,7 @@ class ObservedTurn:
     latency_ms: float = 0.0
     answer: ObservedAnswer | None = None
     provider_failure: str | None = None
+    planner_failure: str | None = None
     adapter_failure: str | None = None
     blocks: tuple[dict[str, Any], ...] = ()
     state_changes: dict[str, Any] | None = None
@@ -285,6 +287,7 @@ _CASE_INSENSITIVE_ARGUMENTS = frozenset(
         "transmission",
     }
 )
+_FREE_TEXT_ARGUMENTS = frozenset({"message", "notes", "reason", "subject"})
 
 
 def _arguments_satisfy(
@@ -294,6 +297,8 @@ def _arguments_satisfy(
 ) -> bool:
     del name
     for field, expected_value in expected.items():
+        if field in _FREE_TEXT_ARGUMENTS:
+            continue
         if expected_value is None:
             continue
         if field not in actual or actual[field] is None:
@@ -334,6 +339,15 @@ def _score_turn(
             "provider",
             None,
             observed.provider_failure,
+        )
+    if observed.planner_failure is not None:
+        return _failed(
+            scenario_id,
+            turn.id,
+            FailureCategory.PLANNER_FAILURE,
+            "planner",
+            None,
+            observed.planner_failure,
         )
     if observed.adapter_failure is not None:
         return _failed(
