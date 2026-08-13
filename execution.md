@@ -153,13 +153,13 @@ Keep audit notes, command logs, pass counts, traces, and intermediate evaluation
 
 **Files:** create `harness/state.py`, `harness/actions.py`, `persistence/base.py`, `persistence/sqlite.py`, and focused tests.
 
-- [ ] Give `ConversationState` and declarative `StructuredMessage` payloads independent schema versions. Model immutable state sections for customer details, page/entity context, search preferences, workflow domain/stage/fields, pending action, verification grants, and presentation groups.
-- [ ] Retain the last five presentation groups with stable entity IDs, display order, snapshot timestamp, and provenance so `the second one` resolves without transcript reconstruction. Mark snapshots non-authoritative.
-- [ ] Model `PendingAction` separately from dealership requests with action ID/type, serialized typed request, state, stable idempotency key, creation/expiry, attempt count, and last normalized failure.
-- [ ] Give workshop verification grants an explicit booking ID and short expiry (default 15 minutes); never infer authorization from cookie possession or old transcript.
-- [ ] Define `ConversationStore.load_or_create`, `load`, `commit(expected_revision, messages, state)`, `delete`, and `purge_expired`. `commit` atomically writes versioned structured messages and state using optimistic revision checks.
-- [ ] Implement SQLite WAL mode, migrations, foreign keys, unique `(conversation_id, client_turn_id)`, and configurable seven-day inactivity retention. Store only an opaque random conversation ID in the browser cookie.
-- [ ] Test restart restoration, revision conflict, duplicate-turn deduplication, atomic rollback, pending-action survival, expired grants, schema rejection/migration, and retention cleanup.
+- [x] Give `ConversationState` and declarative `StructuredMessage` payloads independent schema versions. Model immutable state sections for customer details, page/entity context, search preferences, workflow domain/stage/fields, pending action, verification grants, and presentation groups.
+- [x] Retain the last five presentation groups with stable entity IDs, display order, snapshot timestamp, and provenance so `the second one` resolves without transcript reconstruction. Mark snapshots non-authoritative.
+- [x] Model `PendingAction` separately from dealership requests with action ID/type, serialized typed request, state, stable idempotency key, creation/expiry, attempt count, and last normalized failure.
+- [x] Give workshop verification grants an explicit booking ID and short expiry (default 15 minutes); never infer authorization from cookie possession or old transcript.
+- [x] Define `ConversationStore.load_or_create`, `load`, `commit(expected_revision, messages, state)`, `delete`, and `purge_expired`. `commit` atomically writes versioned structured messages and state using optimistic revision checks.
+- [x] Implement SQLite WAL mode, migrations, foreign keys, unique `(conversation_id, client_turn_id)`, and configurable seven-day inactivity retention. Keep storage keyed only by the opaque conversation ID; the Phase 5 HTTP boundary owns cookie generation and flags.
+- [x] Test restart restoration, revision conflict, duplicate-turn deduplication, atomic rollback, pending-action survival, expired grants, schema rejection/migration, and retention cleanup.
 
 **Exit gate:** identical inputs and explicit `now` values serialize identically; refresh/restart restore state without replaying transcript; duplicate turns cannot duplicate messages or execution records.
 

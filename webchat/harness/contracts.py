@@ -122,6 +122,34 @@ def _arguments_to_dict(arguments: tuple[tuple[str, FrozenJson], ...]) -> dict[st
     return {key: _thaw_json(value) for key, value in arguments}
 
 
+def freeze_json_object(value: Mapping[str, Any], *, field: str) -> FrozenObject:
+    """Return a canonical immutable JSON object for a harness-owned payload."""
+    frozen = _freeze_json(value, path=field)
+    if not isinstance(frozen, FrozenObject):
+        raise ValueError(f"{field} must be a JSON object")
+    return frozen
+
+
+def thaw_json_object(value: FrozenObject) -> dict[str, Any]:
+    """Return ordinary JSON data from a frozen harness payload."""
+    if not isinstance(value, FrozenObject):
+        raise ValueError("value must be a FrozenObject")
+    return {key: _thaw_json(item) for key, item in value.fields}
+
+
+def validate_frozen_json_object(value: object, *, field: str) -> FrozenObject:
+    """Reject manually constructed frozen data that is not canonical JSON."""
+    if not isinstance(value, FrozenObject):
+        raise ValueError(f"{field} must be canonical frozen JSON")
+    try:
+        canonical = freeze_json_object(thaw_json_object(value), field=field)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be canonical frozen JSON") from exc
+    if canonical != value:
+        raise ValueError(f"{field} must be canonical frozen JSON")
+    return value
+
+
 def _validate_frozen_arguments(
     arguments: tuple[tuple[str, FrozenJson], ...],
 ) -> None:
