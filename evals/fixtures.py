@@ -202,7 +202,11 @@ def build_state(name: str, *, now: datetime) -> ConversationState:
         return ConversationState(
             customer=customer if name.endswith("customer_known") else CustomerState(registration="AB12 CDE"),
             entities=EntityContext(selected_dealer_id="northstar-manchester", selected_workshop_slot_id="ws-slot-1"),
-            workflow=_workflow(WorkflowDomain.WORKSHOP, service_type_id="mot"),
+            workflow=_workflow(
+                WorkflowDomain.WORKSHOP,
+                service_type_id="mot",
+                mileage=50_000,
+            ),
         )
     if name == "confirmed_workshop_pending":
         return ConversationState(customer=customer, pending_action=_pending(

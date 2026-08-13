@@ -212,8 +212,8 @@ _CATALOGUE = (
     _spec(
         PreparationCommandName.PREPARE_WORKSHOP_AMENDMENT,
         (W,),
-        "Prepare an amendment to an authorised workshop booking.",
-        {"booking_id": _nullable("string"), "slot_id": _nullable("string"), "mileage": _nullable("integer", minimum=0), "notes": _nullable("string")},
+        "Prepare an amendment to an authorised workshop booking; use slot_ordinal when the customer refers to an ordered fresh slot choice.",
+        {"booking_id": _nullable("string"), "slot_id": _nullable("string"), "slot_ordinal": _nullable("integer", minimum=1), "date_from": _nullable("string"), "date_to": _nullable("string"), "mileage": _nullable("integer", minimum=0), "notes": _nullable("string")},
     ),
     _spec(PreparationCommandName.PREPARE_WORKSHOP_CANCELLATION, (W,), "Prepare cancellation of an authorised workshop booking.", {"booking_id": _nullable("string")}),
     _spec(

@@ -91,6 +91,18 @@ class ToolGateTests(unittest.TestCase):
                 self.assertIn("dealership_query", properties)
                 self.assertIn("customer-facing", command_spec(name).description)
 
+    def test_workshop_amendment_can_express_an_ordinal_slot_intent(self) -> None:
+        properties = command_spec("prepare_workshop_amendment").argument_schema[
+            "properties"
+        ]
+
+        self.assertEqual(
+            properties["slot_ordinal"],
+            {"type": ["integer", "null"], "minimum": 1},
+        )
+        self.assertIn("date_from", properties)
+        self.assertIn("date_to", properties)
+
     def test_no_active_workflow_keeps_all_dealership_entry_options_visible(self) -> None:
         selection = self.gate.select(
             state=ConversationState(),

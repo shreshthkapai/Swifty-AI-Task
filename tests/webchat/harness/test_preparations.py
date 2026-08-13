@@ -28,6 +28,7 @@ from tests.webchat.harness.test_runtime import (
     runtime,
     workshop_booking,
 )
+from tests.webchat.harness.test_mutations import workshop_slot
 
 
 CUSTOMER_STATE = CustomerState(
@@ -211,6 +212,66 @@ class PreparationWorkflowTests(unittest.IsolatedAsyncioTestCase):
                     [block.kind for block in result.blocks],
                     ["confirmation", "business_information"],
                 )
+
+    async def test_workshop_booking_null_arguments_reuse_structured_state(self) -> None:
+        state = ConversationState(
+            customer=CUSTOMER_STATE,
+            entities=replace(
+                ConversationState().entities,
+                selected_workshop_slot_id="ws-slot-1",
+            ),
+            workflow=WorkflowState(
+                WorkflowDomain.WORKSHOP,
+                WorkflowStage.SELECTING_SLOT,
+                gathered_fields={"mileage": 50_000},
+            ),
+        )
+
+        _, result = await self._prepare(
+            PreparationCommandName.PREPARE_WORKSHOP_BOOKING,
+            {
+                "slot_id": None,
+                "registration": None,
+                "mileage": None,
+                "first_name": None,
+                "last_name": None,
+                "email": None,
+                "phone": None,
+            },
+            state=state,
+        )
+
+        payload = result.state.pending_action.request_payload_dict()
+        self.assertEqual(payload["slot_id"], "ws-slot-1")
+        self.assertEqual(payload["registration"], "AB12 CDE")
+        self.assertEqual(payload["mileage"], 50_000)
+
+    async def test_workshop_amendment_reuses_verified_booking_and_resolves_ordinal(self) -> None:
+        state = ConversationState(
+            verification_grants=(VerificationGrant.issue("wsb-1", now=NOW),),
+            workflow=WorkflowState(
+                WorkflowDomain.WORKSHOP,
+                WorkflowStage.COMPLETED,
+                gathered_fields={"booking_id": "wsb-1"},
+            ),
+        )
+        first = replace(workshop_slot(), id="ws-slot-1")
+        second = replace(workshop_slot(), id="ws-slot-2")
+
+        fake, result = await self._prepare(
+            PreparationCommandName.PREPARE_WORKSHOP_AMENDMENT,
+            {"booking_id": None, "slot_id": None, "slot_ordinal": 2},
+            state=state,
+            configure=lambda item: (
+                setattr(item.get_workshop_booking, "return_value", workshop_booking()),
+                setattr(item.list_workshop_slots, "return_value", (first, second)),
+            ),
+        )
+
+        payload = result.state.pending_action.request_payload_dict()
+        self.assertEqual(payload["booking_id"], "wsb-1")
+        self.assertEqual(payload["slot_id"], "ws-slot-2")
+        fake.amend_workshop_booking.assert_not_awaited()
 
 
 if __name__ == "__main__":

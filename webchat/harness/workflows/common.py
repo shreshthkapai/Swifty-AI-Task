@@ -45,6 +45,13 @@ def optional(arguments: Mapping[str, Any], key: str, fallback: Any = None) -> An
     return fallback if value is None else value
 
 
+def first_known(*values: Any) -> Any | None:
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None
+
+
 def parse_date(value: Any, field: str) -> date | None:
     if value is None:
         return None

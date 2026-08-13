@@ -20,6 +20,7 @@ from .common import (
     CommandOutcome,
     customer_payload,
     dealer_recovery,
+    first_known,
     missing_information,
     parse_date,
     policy_recovery,
@@ -181,10 +182,19 @@ async def execute_workshop_preparation(
     id_factory: Callable[[], str],
     policy: PolicyEngine,
 ) -> CommandOutcome | None:
+    gathered = state.workflow.gathered_fields_dict()
     if name is PreparationCommandName.PREPARE_WORKSHOP_BOOKING:
-        slot_id = arguments.get("slot_id") or state.entities.selected_workshop_slot_id
-        registration = arguments.get("registration") or state.customer.registration
-        mileage = arguments.get("mileage")
+        slot_id = first_known(
+            arguments.get("slot_id"),
+            state.entities.selected_workshop_slot_id,
+            gathered.get("slot_id"),
+        )
+        registration = first_known(
+            arguments.get("registration"),
+            state.customer.registration,
+            gathered.get("registration"),
+        )
+        mileage = first_known(arguments.get("mileage"), gathered.get("mileage"))
         missing = tuple(key for key, value in (("slot_id", slot_id), ("registration", registration), ("mileage", mileage)) if value is None or value == "")
         if missing:
             return missing_information(state, missing, domain=WorkflowDomain.WORKSHOP, renderer=renderer)
@@ -206,7 +216,7 @@ async def execute_workshop_preparation(
         )
 
     if name is PreparationCommandName.PREPARE_WORKSHOP_AMENDMENT:
-        booking_id = arguments.get("booking_id")
+        booking_id = first_known(arguments.get("booking_id"), gathered.get("booking_id"))
         if not booking_id:
             return missing_information(state, ("booking_id",), domain=WorkflowDomain.WORKSHOP, renderer=renderer)
         try:
@@ -218,7 +228,29 @@ async def execute_workshop_preparation(
             policy.require_booking_amendable(booking)
         except PolicyError as exc:
             return policy_recovery(state, exc, renderer=renderer)
-        slot_id = arguments.get("slot_id") or state.entities.selected_workshop_slot_id
+        slot_id = first_known(
+            arguments.get("slot_id"),
+            state.entities.selected_workshop_slot_id,
+            gathered.get("slot_id"),
+        )
+        slot_ordinal = arguments.get("slot_ordinal")
+        if slot_id is None and slot_ordinal is not None:
+            slots = await dealer.list_workshop_slots(
+                WorkshopSlotSearch(
+                    dealership_id=booking.dealership_id,
+                    service_type_id=booking.service_type_id,
+                    date_from=parse_date(arguments.get("date_from"), "date_from"),
+                    date_to=parse_date(arguments.get("date_to"), "date_to"),
+                )
+            )
+            if slot_ordinal > len(slots):
+                return missing_information(
+                    state,
+                    ("valid_slot_ordinal",),
+                    domain=WorkflowDomain.WORKSHOP,
+                    renderer=renderer,
+                )
+            slot_id = slots[slot_ordinal - 1].id
         if slot_id is None and arguments.get("mileage") is None and arguments.get("notes") is None:
             return missing_information(state, ("slot_id_or_booking_change",), domain=WorkflowDomain.WORKSHOP, renderer=renderer)
         return prepare_action(
@@ -229,7 +261,7 @@ async def execute_workshop_preparation(
         )
 
     if name is PreparationCommandName.PREPARE_WORKSHOP_CANCELLATION:
-        booking_id = arguments.get("booking_id")
+        booking_id = first_known(arguments.get("booking_id"), gathered.get("booking_id"))
         if not booking_id:
             return missing_information(state, ("booking_id",), domain=WorkflowDomain.WORKSHOP, renderer=renderer)
         try:
