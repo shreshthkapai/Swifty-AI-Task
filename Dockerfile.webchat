@@ -1,0 +1,23 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+COPY evals ./evals
+COPY server ./server
+COPY webchat ./webchat
+
+RUN python -m pip install --no-cache-dir . \
+    && groupadd --system webchat \
+    && useradd --system --gid webchat --home-dir /nonexistent webchat \
+    && mkdir -p /data \
+    && chown webchat:webchat /data
+
+USER webchat
+
+EXPOSE 4020
+
+CMD ["python", "-m", "uvicorn", "server.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "4020", "--workers", "1", "--no-access-log"]

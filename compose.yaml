@@ -33,5 +33,49 @@ services:
       dealership-platform:
         condition: service_healthy
 
+  webchat-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.webchat
+    environment:
+      CHAT_ENVIRONMENT: local
+      CHAT_PROVIDER: ${CHAT_PROVIDER:-openai}
+      CHAT_MODEL: ${CHAT_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      NORTHSTAR_BASE_URL: http://dealership-platform:4010
+      NORTHSTAR_API_KEY: ${NORTHSTAR_API_KEY:-northstar-local-development}
+      CHAT_DATABASE_PATH: /data/webchat.sqlite3
+      CHAT_ALLOWED_ORIGIN: ${CHAT_ALLOWED_ORIGIN:-http://localhost:4173}
+      CHAT_RETENTION_DAYS: ${CHAT_RETENTION_DAYS:-7}
+      CHAT_PROVIDER_TIMEOUT_SECONDS: ${CHAT_PROVIDER_TIMEOUT_SECONDS:-20}
+      CHAT_DATABASE_TIMEOUT_SECONDS: ${CHAT_DATABASE_TIMEOUT_SECONDS:-5}
+      CHAT_MAX_BODY_BYTES: ${CHAT_MAX_BODY_BYTES:-16384}
+      CHAT_MAX_MESSAGE_CHARS: ${CHAT_MAX_MESSAGE_CHARS:-4000}
+      NORTHSTAR_CONNECT_TIMEOUT_SECONDS: ${NORTHSTAR_CONNECT_TIMEOUT_SECONDS:-2}
+      NORTHSTAR_READ_TIMEOUT_SECONDS: ${NORTHSTAR_READ_TIMEOUT_SECONDS:-5}
+      NORTHSTAR_WRITE_TIMEOUT_SECONDS: ${NORTHSTAR_WRITE_TIMEOUT_SECONDS:-5}
+      NORTHSTAR_POOL_TIMEOUT_SECONDS: ${NORTHSTAR_POOL_TIMEOUT_SECONDS:-2}
+    ports:
+      - "4020:4020"
+    volumes:
+      - northstar-webchat-data:/data
+    depends_on:
+      dealership-platform:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:4020/health')",
+        ]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+      start_period: 3s
+
 volumes:
   northstar-platform-data:
+  northstar-webchat-data:

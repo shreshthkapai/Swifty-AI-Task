@@ -199,13 +199,13 @@ Keep audit notes, command logs, pass counts, traces, and intermediate evaluation
 
 **Files:** create `server/config.py`, `server/app.py`, `observability.py`, server tests, `Dockerfile.webchat`, `.env.example`; update `pyproject.toml`, `compose.yaml`, and `.gitignore`.
 
-- [ ] Compose `NorthstarAdapter`, `SQLiteConversationStore`, configured `PlanningProvider`, and `HarnessRuntime` only at startup. Core packages do not read environment variables.
-- [ ] Provide `GET /health`, `GET /api/chat/session`, `POST /api/chat/turns`, and `DELETE /api/chat/session`. A turn accepts a client-generated ID, either text or a declarative action reference, and sanitized page observation.
-- [ ] On first session access, generate the conversation ID with `secrets.token_urlsafe(32)` and set `northstar_chat=<opaque token>` with `HttpOnly`, `SameSite=Lax`, scoped path, retention-aligned `Max-Age`, and `Secure` outside local development. Return transcript/UI blocks, not internal state.
-- [ ] Allow credentials only from the configured website origin (`http://localhost:4173` locally), cap message/body sizes, reject unknown fields/actions, and return stable safe error envelopes.
-- [ ] Add per-conversation serialization or optimistic-conflict retry so concurrent turns cannot reorder state. Return an in-flight conflict without repeating provider/dealer work when safety is uncertain.
-- [ ] Emit one redacted JSON event per turn and external call with request/turn IDs, hashed conversation ID, route, operation, duration, retries, model calls/tokens, outcome, and normalized error kind.
-- [ ] Add a `webchat-api` Compose service on port `4020`, persistent SQLite volume, health check, and explicit environment names: `CHAT_PROVIDER`, `CHAT_MODEL`, `OPENAI_API_KEY`, `NORTHSTAR_BASE_URL`, `NORTHSTAR_API_KEY`, `CHAT_DATABASE_PATH`, `CHAT_ALLOWED_ORIGIN`, and retention/timeout settings.
+- [x] Compose `NorthstarAdapter`, `SQLiteConversationStore`, configured `PlanningProvider`, and `HarnessRuntime` only at startup. Core packages do not read environment variables.
+- [x] Provide `GET /health`, `GET /api/chat/session`, `POST /api/chat/turns`, and `DELETE /api/chat/session`. A turn accepts a client-generated ID, either text or a declarative action reference, and sanitized page observation.
+- [x] On first session access, generate the conversation ID with `secrets.token_urlsafe(32)` and set `northstar_chat=<opaque token>` with `HttpOnly`, `SameSite=Lax`, scoped path, retention-aligned `Max-Age`, and `Secure` outside local development. Return transcript/UI blocks, not internal state.
+- [x] Allow credentials only from the configured website origin (`http://localhost:4173` locally), cap message/body sizes, reject unknown fields/actions, and return stable safe error envelopes.
+- [x] Add per-conversation serialization or optimistic-conflict retry so concurrent turns cannot reorder state. Return an in-flight conflict without repeating provider/dealer work when safety is uncertain.
+- [x] Emit one redacted JSON event per turn and external call with request/turn IDs, hashed conversation ID, route, operation, duration, retries, model calls/tokens, outcome, and normalized error kind.
+- [x] Add a `webchat-api` Compose service on port `4020`, persistent SQLite volume, health check, and explicit environment names: `CHAT_PROVIDER`, `CHAT_MODEL`, `OPENAI_API_KEY`, `NORTHSTAR_BASE_URL`, `NORTHSTAR_API_KEY`, `CHAT_DATABASE_PATH`, `CHAT_ALLOWED_ORIGIN`, and retention/timeout settings.
 
 **Exit gate:** API contract tests prove cookie restoration, CORS, validation, duplicate-turn handling, redaction, provider/dealer outage responses, and backend restart persistence; secrets never appear in responses or logs.
 

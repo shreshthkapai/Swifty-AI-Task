@@ -3,7 +3,7 @@ from collections.abc import Callable
 
 import httpx
 
-from webchat.adapters.northstar.adapter import NorthstarAdapter
+from webchat.adapters.northstar.adapter import NorthstarAdapter, operation_retry_count
 from webchat.adapters.northstar.client import NorthstarClient
 from webchat.adapters.northstar.config import NorthstarConfig
 from webchat.domain import (
@@ -251,6 +251,27 @@ class NorthstarDealershipAdapterTestCase(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raised.exception.kind, DealerErrorKind.NOT_FOUND)
         self.assertEqual(calls, 1)
+
+    async def test_retry_count_is_exposed_to_same_task_for_observability(self) -> None:
+        calls = 0
+
+        async def sleep(delay: float) -> None:
+            return None
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            if calls < 3:
+                return httpx.Response(
+                    500,
+                    json=platform_error("INTERNAL_ERROR", retryable=True),
+                )
+            return httpx.Response(200, json={"items": [LOCATION_PAYLOAD]})
+
+        adapter = self.make_adapter(handler, sleep=sleep)
+        await adapter.list_dealerships()
+
+        self.assertEqual(operation_retry_count(), 2)
 
     async def test_dealership_identifier_is_encoded_as_one_path_segment(self) -> None:
         requests: list[httpx.Request] = []

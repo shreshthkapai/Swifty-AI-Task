@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
+from contextvars import ContextVar
 import time
 from typing import Any, TypeVar
 from urllib.parse import quote
@@ -93,6 +94,20 @@ from .mapping.workshop import (
 T = TypeVar("T")
 AsyncOperation = Callable[[], Awaitable[T]]
 Sleep = Callable[[float], Awaitable[None]]
+
+_OPERATION_RETRY_COUNT: ContextVar[int] = ContextVar(
+    "northstar_operation_retry_count", default=0
+)
+
+
+def reset_operation_retry_count() -> None:
+    """Reset retry telemetry for the current async task before an adapter call."""
+    _OPERATION_RETRY_COUNT.set(0)
+
+
+def operation_retry_count() -> int:
+    """Return completed retry attempts for the current async task."""
+    return _OPERATION_RETRY_COUNT.get()
 
 _MESSAGE_FIELD_MAP = {
     "dealershipId": "dealership_id",
@@ -516,7 +531,12 @@ class NorthstarAdapter:
         return await self._retry_temporary(operation)
 
     async def _retry_temporary(self, operation: AsyncOperation[T]) -> T:
-        for delay in (*self._client.config.retry_delays_seconds, None):
+        for attempt, delay in enumerate(
+            (*self._client.config.retry_delays_seconds, None)
+        ):
+            _OPERATION_RETRY_COUNT.set(
+                max(_OPERATION_RETRY_COUNT.get(), attempt)
+            )
             try:
                 return await operation()
             except DealerError as error:

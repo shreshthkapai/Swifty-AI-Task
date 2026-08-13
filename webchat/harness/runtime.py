@@ -44,6 +44,26 @@ def _random_id() -> str:
     return secrets.token_urlsafe(18)
 
 
+SUPPORTED_UI_ACTION_TYPES = frozenset(
+    {
+        "cancel",
+        "confirm",
+        "find_test_drive_slots",
+        "register_interest",
+        "reselect_slot",
+        "retry",
+        "sales_enquiry",
+        "select_dealership",
+        "select_test_drive_slot",
+        "select_vehicle",
+        "select_workshop_slot",
+        "show_more",
+        "start_over",
+        "switch_workflow",
+    }
+)
+
+
 @dataclass(frozen=True, slots=True)
 class TurnResult:
     state: ConversationState

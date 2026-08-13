@@ -6,4 +6,10 @@ __pycache__/
 *.sqlite3
 .env
 .env.*
+!.env.example
+artifacts/
+data/
+build/
+dist/
+*.egg-info/
 dealership-platform/data/

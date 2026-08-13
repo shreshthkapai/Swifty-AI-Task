@@ -8,7 +8,11 @@ requirements in [PRODUCT-BRIEF.md](./PRODUCT-BRIEF.md).
 Requirements:
 
 - Docker with Docker Compose
-- Ports `4010` and `4173` available
+- Ports `4010`, `4020`, and `4173` available
+- An OpenAI API key in `.env` for the server-side chat planner
+
+Create `.env` from `.env.example`, set `OPENAI_API_KEY`, and optionally change
+`CHAT_MODEL`. Never place provider or dealership keys in browser code.
 
 ```bash
 docker compose up --build -d
@@ -17,6 +21,7 @@ docker compose up --build -d
 Then open:
 
 - Dealership website: http://localhost:4173
+- Webchat API health: http://localhost:4020/health
 - API documentation: http://localhost:4010/docs
 - Dealership Systems Console: http://localhost:4010/admin
 
@@ -52,15 +57,15 @@ Resetting clears dealership-platform records and restores the original seed data
 docker compose down
 ```
 
-State is retained in the `northstar-platform-data` Docker volume until reset or removal.
+Dealership and anonymous chat state remain in their named Docker volumes until reset or removal.
 
-## Adapter development
+## Webchat development
 
 The dealer-independent contracts and Northstar adapter require Python 3.12 or newer:
 
 ```bash
 python -m pip install .
-python -m unittest discover -s tests/webchat -p "test_*.py" -v
+python -m unittest discover -s tests -t . -p "test_*.py" -v
 ```
 
 The live contract tests start an isolated dealership-platform process and temporary SQLite
