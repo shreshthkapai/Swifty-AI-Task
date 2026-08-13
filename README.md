@@ -72,6 +72,30 @@ The live contract tests start an isolated dealership-platform process and tempor
 database. Runtime configuration uses `NORTHSTAR_BASE_URL` and the server-side
 `NORTHSTAR_API_KEY`; never expose the API key to browser code.
 
+## Reviewer verification
+
+Run the authored unit, integration, API, adapter, and conversational tests together with the
+supplied dealership-platform tests:
+
+```bash
+python -m evals.verify
+```
+
+The command prints dense suite statistics and writes a sanitized machine-readable report to
+`artifacts/evals/reviewer-report.json`. Generated reports are gitignored. Selected assignment
+edge cases and their actual deterministic harness outputs over hermetic dealer fixtures are
+committed in [`evals/examples.json`](./evals/examples.json); inspect one without running the
+suites using:
+
+```bash
+python -m evals.verify --example stale-test-drive-slot
+```
+
+The examples cover scope routing, dealership-adjacent advice, mixed requests, reserved/sold
+vehicles, price-on-request, stale slots, workshop verification, and holiday hours. They contain
+no credentials, customer PII, hidden reasoning, or provider envelopes. The live adapter and
+supplied-platform suites independently verify Northstar's real HTTP contract and seeded records.
+
 ## Dealership services
 
 The dealership platform provides:

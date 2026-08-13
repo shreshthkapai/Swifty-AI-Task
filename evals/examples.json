@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "lane": "scripted",
+  "fixture": "hermetic-dealer",
+  "evaluated_commit": "fba9c33126169ab3788125fc33cbde4fab877487",
+  "examples": [
+    {
+      "id": "scope-moon",
+      "title": "Clearly unrelated trivia is redirected without external calls",
+      "risk": "scope",
+      "source_test": "tests.conversations.test_runtime_answers.RuntimeQuestionTests.test_obvious_trivia_redirects_without_provider_or_dealer",
+      "input": {"current_input": "What size is the moon?"},
+      "actual": {"model_calls": 0, "executed_commands": [], "blocks": [{"kind": "text", "payload": {"schema_version": 1, "text": "I can help with vehicles, test drives, sales, servicing, and Northstar dealership information."}}]}
+    },
+    {
+      "id": "adjacent-family-suv",
+      "title": "Useful dealership-adjacent advice remains in scope",
+      "risk": "adjacent-advice",
+      "source_test": "tests.conversations.test_runtime_answers.RuntimeQuestionTests.test_family_suv_advice_uses_one_planning_call_and_no_dealer_tools",
+      "input": {"current_input": "Is an SUV good for a family of five?"},
+      "actual": {"model_calls": 1, "executed_commands": [], "blocks": [{"kind": "text", "payload": {"schema_version": 1, "text": "An SUV can suit five people; compare rear-seat space, boot capacity, and running costs."}}]}
+    },
+    {
+      "id": "mixed-telescope-x3",
+      "title": "Mixed trivia and vehicle request retains only the dealership intent",
+      "risk": "scope",
+      "source_test": "tests.conversations.test_runtime_answers.RuntimeQuestionTests.test_mixed_moon_question_answers_only_vehicle_space_from_dealer_data",
+      "input": {"current_input": "How big is the moon, and will my telescope fit in this X3?", "page_vehicle_id": "veh-003"},
+      "actual": {"model_calls": 1, "executed_commands": ["get_vehicle_details"], "blocks": [{"kind": "vehicle_cards", "payload": {"schema_version": 1, "vehicles": [{"id": "veh-003", "label": "2024 BMW X3 xDrive20d M Sport", "make": "BMW", "model": "X3", "variant": "xDrive20d M Sport", "year": 2024, "price": {"amount_minor": 4299500, "currency": "GBP", "display": "£42,995"}, "monthly_price": null, "mileage": 8000, "fuel_type": "Diesel", "transmission": "Automatic", "body_style": "SUV", "colour": "Blue", "availability": "available", "dealership_id": "northstar-manchester", "dealership_name": "Northstar Manchester", "image_url": "/x3.jpg"}], "actions": [{"action_id": "id-1", "action_type": "select_vehicle", "entity_id": "veh-003", "label": "View vehicle"}]}}, {"kind": "vehicle_details", "payload": {"schema_version": 1, "items": [{"description": "Dealer description", "highlights": ["Large boot"], "vehicle_id": "veh-003"}]}}, {"kind": "link", "payload": {"schema_version": 1, "label": "View on website", "href": "/?vehicle=veh-003"}}]}
+    },
+    {
+      "id": "price-on-request",
+      "title": "Missing dealer price remains unknown",
+      "risk": "business-truth",
+      "source_test": "tests.webchat.harness.test_runtime.HarnessRuntimeTests.test_vehicle_search_updates_preferences_and_renders_unknown_price",
+      "input": {"current_input": "Find a BMW under £30k"},
+      "actual": {"model_calls": 1, "executed_commands": ["search_vehicles"], "blocks": [{"kind": "vehicle_cards", "payload": {"schema_version": 1, "vehicles": [{"id": "veh-019", "label": "2024 BMW X3 xDrive20d M Sport", "make": "BMW", "model": "X3", "variant": "xDrive20d M Sport", "year": 2024, "price": {"amount_minor": null, "currency": null, "display": "Price on request"}, "monthly_price": null, "mileage": 8000, "fuel_type": "Diesel", "transmission": "Automatic", "body_style": "SUV", "colour": "Blue", "availability": "available", "dealership_id": "northstar-manchester", "dealership_name": "Northstar Manchester", "image_url": "/x3.jpg"}], "actions": [{"action_id": "id-1", "action_type": "select_vehicle", "entity_id": "veh-019", "label": "View vehicle"}]}}]}
+    },
+    {
+      "id": "reserved-confirm",
+      "title": "Reserved vehicle blocks test-drive execution and offers valid alternatives",
+      "risk": "business-truth",
+      "source_test": "tests.webchat.harness.test_runtime.HarnessRuntimeTests.test_reserved_vehicle_never_reaches_booking_and_offers_safe_alternatives",
+      "input": {"current_input": "confirm", "pending_action": "test_drive_booking", "live_vehicle_status": "reserved"},
+      "actual": {"model_calls": 0, "executed_commands": [], "blocks": [{"kind": "notice", "payload": {"schema_version": 1, "code": "vehicle_reserved", "text": "That vehicle is reserved and cannot be booked for a test drive."}}, {"kind": "actions", "payload": {"schema_version": 1, "actions": [{"action_id": "id-1", "action_type": "register_interest", "label": "Register interest", "entity_id": "veh-003"}, {"action_id": "id-2", "action_type": "sales_enquiry", "label": "Send a sales enquiry", "entity_id": "veh-003"}]}}]}
+    },
+    {
+      "id": "sold-confirm",
+      "title": "Sold vehicle blocks test-drive execution and offers enquiry only",
+      "risk": "business-truth",
+      "source_test": "tests.conversations.test_runtime_answers.RuntimeQuestionTests.test_sold_vehicle_confirmation_offers_enquiry_only",
+      "input": {"current_input": "confirm", "pending_action": "test_drive_booking", "live_vehicle_status": "sold"},
+      "actual": {"model_calls": 0, "executed_commands": [], "blocks": [{"kind": "notice", "payload": {"schema_version": 1, "code": "vehicle_sold", "text": "That vehicle has been sold and cannot be booked for a test drive."}}, {"kind": "actions", "payload": {"schema_version": 1, "actions": [{"action_id": "id-1", "action_type": "sales_enquiry", "label": "Send a sales enquiry", "entity_id": "veh-003"}]}}]}
+    },
+    {
+      "id": "stale-test-drive-slot",
+      "title": "Disappearing slot is not booked and refreshed choices are returned",
+      "risk": "stale-state",
+      "source_test": "tests.conversations.test_runtime_answers.RuntimeQuestionTests.test_disappearing_slot_refreshes_choices_without_booking",
+      "input": {"current_input": "confirm", "pending_action": "test_drive_booking", "selected_slot": "td-slot-old"},
+      "actual": {"model_calls": 0, "executed_commands": [], "blocks": [{"kind": "notice", "payload": {"schema_version": 1, "code": "slot_unavailable", "text": "That slot is no longer available."}}, {"kind": "actions", "payload": {"schema_version": 1, "actions": [{"action_id": "id-1", "action_type": "reselect_slot", "label": "Choose another slot", "entity_id": "veh-003"}]}}, {"kind": "slot_choices", "payload": {"schema_version": 1, "items": [{"id": "td-slot-new", "starts_at": "2026-08-14T12:00:00+00:00", "label": "BMW X3"}], "actions": [{"action_id": "id-2", "action_type": "select_test_drive_slot", "entity_id": "td-slot-new"}]}}]}
+    },
+    {
+      "id": "incorrect-booking-identity",
+      "title": "Failed workshop identity verification reveals no matching field",
+      "risk": "verification",
+      "source_test": "tests.conversations.test_runtime_answers.RuntimeQuestionTests.test_incorrect_workshop_identity_is_safe_and_creates_no_grant",
+      "input": {"current_input": "Find WORK-10001 using these identity details"},
+      "actual": {"model_calls": 1, "executed_commands": ["retrieve_workshop_booking"], "blocks": [{"kind": "notice", "payload": {"schema_version": 1, "code": "verification_failed", "text": "I could not verify a workshop booking with those details."}}]}
+    },
+    {
+      "id": "bank-holiday-hours",
+      "title": "Holiday exception overrides ordinary dealership hours",
+      "risk": "business-truth",
+      "source_test": "tests.conversations.test_runtime_answers.RuntimeQuestionTests.test_bank_holiday_hours_render_the_authoritative_exception",
+      "input": {"current_input": "What time is Manchester sales open on the upcoming bank holiday?"},
+      "actual": {"model_calls": 1, "executed_commands": ["get_dealership_hours"], "blocks": [{"kind": "opening_hours", "payload": {"schema_version": 1, "items": [{"kind": "holiday", "date": "2026-08-31", "label": "Summer bank holiday", "department": "sales", "closed": false, "opens_at": "10:00", "closes_at": "16:00"}]}}]}
+    }
+  ]
+}

@@ -5,7 +5,7 @@ import unittest
 from webchat.domain.common import Department
 from webchat.domain.dealerships import HolidayOpening, OpeningHours
 from webchat.domain.errors import DealerError, DealerErrorKind, DealerFailure
-from webchat.domain.vehicles import VehicleDetails
+from webchat.domain.vehicles import VehicleAvailabilityStatus, VehicleDetails
 from webchat.domain.workshop import WorkshopBookingDetails
 from webchat.harness.actions import (
     PendingAction,
@@ -56,7 +56,11 @@ class RuntimeQuestionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(provider.requests, [])
         self.assertEqual(result.model_calls, 0)
-        self.assertIn("vehicles", result.blocks[0].to_dict()["payload"]["text"])
+        self.assertEqual(
+            result.blocks[0].to_dict()["payload"]["text"],
+            "I can help with vehicles, test drives, sales, servicing, and Northstar "
+            "dealership information.",
+        )
         self.assertEqual(fake.method_calls, [])
 
     async def test_family_suv_advice_uses_one_planning_call_and_no_dealer_tools(self) -> None:
@@ -219,6 +223,49 @@ class RuntimeQuestionTests(unittest.IsolatedAsyncioTestCase):
         fake.book_test_drive.assert_not_awaited()
         self.assertEqual(result.state.pending_action.state, PendingActionState.FAILED)
         self.assertIn("slot_choices", {block.kind for block in result.blocks})
+
+    async def test_sold_vehicle_confirmation_offers_enquiry_only(self) -> None:
+        fake = dealer()
+        fake.get_vehicle_availability.return_value = availability(
+            VehicleAvailabilityStatus.SOLD
+        )
+        inert = TurnPlan(TurnScope.IN_DOMAIN, (), ResponseStrategy.ACKNOWLEDGEMENT)
+        harness, provider = runtime(fake, inert)
+        action = PendingAction.from_mapping(
+            action_id="pending-1",
+            action_type=PendingActionType.TEST_DRIVE_BOOKING,
+            request_type=PendingRequestType.TEST_DRIVE_BOOKING,
+            request_payload={
+                "slot_id": "td-slot-1",
+                "vehicle_id": "veh-003",
+                "customer": {
+                    "first_name": "Jamie",
+                    "last_name": "Taylor",
+                    "email": "jamie@example.com",
+                    "phone": "07700900123",
+                },
+            },
+            state=PendingActionState.AWAITING_CONFIRMATION,
+            idempotency_key="idem-1",
+            created_at=NOW,
+            expires_at=NOW + timedelta(minutes=15),
+        )
+
+        result = await harness.handle(
+            TurnRequest(
+                current_input="confirm",
+                state=ConversationState(pending_action=action),
+                now=NOW,
+            )
+        )
+
+        self.assertEqual(provider.requests, [])
+        fake.book_test_drive.assert_not_awaited()
+        actions = next(block for block in result.blocks if block.kind == "actions")
+        self.assertEqual(
+            [item["action_type"] for item in actions.to_dict()["payload"]["actions"]],
+            ["sales_enquiry"],
+        )
 
     async def test_corrected_workshop_identity_reuses_structured_lookup_fields(self) -> None:
         fake = dealer()

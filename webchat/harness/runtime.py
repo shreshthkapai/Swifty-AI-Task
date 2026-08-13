@@ -203,7 +203,12 @@ class HarnessRuntime:
         if route.kind is DeterministicRouteKind.DOMAIN_REDIRECT:
             return CommandOutcome(
                 state,
-                (self._renderer.text("I can help with vehicles, test drives, sales, servicing, and dealership information."),),
+                (
+                    self._renderer.text(
+                        "I can help with vehicles, test drives, sales, servicing, and "
+                        "Northstar dealership information."
+                    ),
+                ),
             )
         if route.kind is DeterministicRouteKind.CONFIRM_PENDING_ACTION:
             return await self._confirm(state, now=request.now)
