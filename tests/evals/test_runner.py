@@ -202,6 +202,48 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.divergence.actual["max_price_minor"], 3_500_000)
 
+    def test_semantic_command_arguments_ignore_null_noise_and_filter_case(self) -> None:
+        corpus = load_corpus(CORPUS_PATH)
+        scenario = next(item for item in corpus.scenarios if item.id == "vehicle-02")
+        turn = scenario.turns[0]
+        observation = ObservedTurn(
+            commands=(
+                ReadCommand.from_mapping(
+                    ReadCommandName.SEARCH_VEHICLES,
+                    {
+                        "availability": None,
+                        "body_style": None,
+                        "fuel_type": None,
+                        "make": "bmw",
+                        "max_price_minor": 3_000_000,
+                        "model": None,
+                        "sort": None,
+                        "transmission": "automatic",
+                    },
+                ),
+            ),
+            state={
+                "preferences": {
+                    "make": "BMW",
+                    "transmission": "Automatic",
+                    "max_price_minor": 3_000_000,
+                }
+            },
+            model_calls=1,
+            answer=ObservedAnswer(
+                strategy="search_results",
+                block_types=("vehicle_cards",),
+                facts=("constraints_applied",),
+                next_steps=("select_vehicle",),
+                direct=True,
+            ),
+        )
+
+        result = score_turn(scenario.id, turn, observation)
+
+        self.assertTrue(result.passed)
+        self.assertIsNone(result.divergence)
+
     def test_lane_parity_allows_only_planning_source_to_differ(self) -> None:
         common = {
             "corpus_version": "2026-08-13.1",

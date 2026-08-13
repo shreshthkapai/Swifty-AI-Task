@@ -269,6 +269,57 @@ def _missing(required: tuple[str, ...], actual: tuple[str, ...]) -> list[str]:
     return sorted(set(required) - set(actual))
 
 
+_CASE_INSENSITIVE_ARGUMENTS = frozenset(
+    {
+        "availability",
+        "body_style",
+        "condition",
+        "currency",
+        "department",
+        "enquiry_type",
+        "fuel_type",
+        "make",
+        "model",
+        "refinement",
+        "sort",
+        "transmission",
+    }
+)
+
+
+def _arguments_satisfy(
+    name: str,
+    expected: dict[str, Any],
+    actual: dict[str, Any],
+) -> bool:
+    del name
+    for field, expected_value in expected.items():
+        if expected_value is None:
+            continue
+        if field not in actual or actual[field] is None:
+            return False
+        actual_value = actual[field]
+        if isinstance(expected_value, dict):
+            if not isinstance(actual_value, dict) or not _arguments_satisfy(
+                field,
+                expected_value,
+                actual_value,
+            ):
+                return False
+            continue
+        if (
+            field in _CASE_INSENSITIVE_ARGUMENTS
+            and isinstance(expected_value, str)
+            and isinstance(actual_value, str)
+        ):
+            if expected_value.casefold() != actual_value.casefold():
+                return False
+            continue
+        if expected_value != actual_value:
+            return False
+    return True
+
+
 def _score_turn(
     scenario_id: str,
     turn: CorpusTurn,
@@ -343,7 +394,12 @@ def _score_turn(
                 if command.name is expected_command.name
             ]
             if matching and not any(
-                command.arguments == expected_command.arguments for command in matching
+                _arguments_satisfy(
+                    expected_command.name.value,
+                    expected_command.to_dict()["arguments"],
+                    command.to_dict()["arguments"],
+                )
+                for command in matching
             ):
                 return _failed(
                     scenario_id,
