@@ -15,6 +15,8 @@ from webchat.adapters.northstar.adapter import (
     operation_retry_count,
     reset_operation_retry_count,
 )
+from webchat.adapters.northstar.validation import customer_phone_is_valid
+from webchat.harness.policy import PolicyEngine
 from webchat.harness.planning import PlanningEngine, TurnRequest
 from webchat.harness.runtime import HarnessRuntime, TurnResult
 from webchat.persistence import ConversationStore, SQLiteConversationStore
@@ -96,6 +98,7 @@ def build_services(
         dealer=dealer,
         planning=PlanningEngine(provider),
         grounded_response=grounded_response,
+        policy=PolicyEngine(phone_validator=customer_phone_is_valid),
     )
     return ChatServices(
         runtime=runtime,

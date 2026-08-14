@@ -135,6 +135,7 @@ def turn_messages(
                 "action_submission",
                 {
                     "schema_version": API_SCHEMA_VERSION,
+                    "action_id": turn.action.action_id,
                     "action_type": turn.action.action_type,
                 },
             ),

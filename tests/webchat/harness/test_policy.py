@@ -62,6 +62,22 @@ class PolicyEngineTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, PolicyCode.INVALID_CUSTOMER_DETAILS)
         self.assertEqual(raised.exception.fields, ("phone",))
 
+    def test_customer_validation_accepts_a_dealer_specific_phone_rule(self) -> None:
+        policy = PolicyEngine(phone_validator=lambda value: value.startswith("07"))
+        state = ConversationState(
+            customer=CustomerState(
+                first_name="Jane",
+                last_name="Doe",
+                email="jane.doe@example.com",
+            )
+        )
+
+        with self.assertRaises(PolicyError) as raised:
+            policy.customer_identity({"phone": "0077012345"}, state=state)
+
+        self.assertEqual(raised.exception.code, PolicyCode.INVALID_CUSTOMER_DETAILS)
+        self.assertEqual(raised.exception.fields, ("phone",))
+
     def test_mutation_requires_live_unexpired_confirmation(self) -> None:
         with self.assertRaises(PolicyError) as raised:
             self.policy.authorize_execution(pending(), now=NOW)

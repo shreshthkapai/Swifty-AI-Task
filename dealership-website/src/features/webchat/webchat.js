@@ -162,6 +162,16 @@ export function createWebchat({ root, api, getPageObservation, document = global
   let inFlight = Promise.resolve();
   let optimisticText = null;
   let retryOperation = null;
+  let submittedActionIds = new Set();
+
+  function rememberSubmittedActions(items) {
+    for (const message of items) {
+      for (const block of message.blocks || []) {
+        const actionId = block.kind === "action_submission" && block.payload?.action_id;
+        if (actionId) submittedActionIds.add(actionId);
+      }
+    }
+  }
 
   function setStatus(text, loading = false) {
     nodes.status.textContent = text;
@@ -206,7 +216,9 @@ export function createWebchat({ root, api, getPageObservation, document = global
   function applyBusyState() {
     nodes.textarea.disabled = busy;
     nodes.send.disabled = busy || !nodes.textarea.value.trim();
-    for (const button of nodes.transcript.querySelectorAll("button")) button.disabled = busy;
+    for (const button of nodes.transcript.querySelectorAll("button")) {
+      button.disabled = busy || submittedActionIds.has(button.dataset.actionId);
+    }
     nodes.panel.setAttribute("aria-busy", String(busy));
   }
 
@@ -248,6 +260,7 @@ export function createWebchat({ root, api, getPageObservation, document = global
     try {
       const result = await api.sendTurn(payload);
       messages.push(...result.messages);
+      rememberSubmittedActions(result.messages);
       optimisticText = null;
       completed = true;
       if (!open) root.classList.add("has-unread");
@@ -282,6 +295,7 @@ export function createWebchat({ root, api, getPageObservation, document = global
 
   function submitAction(action) {
     if (busy || !action?.action_id || !action?.action_type) return;
+    submittedActionIds.add(action.action_id);
     inFlight = perform(payloadFor({ action: { action_id: action.action_id, action_type: action.action_type } }));
   }
 
@@ -293,6 +307,7 @@ export function createWebchat({ root, api, getPageObservation, document = global
     try {
       await api.deleteSession();
       messages = [];
+      submittedActionIds = new Set();
       optimisticText = null;
       nodes.resetConfirmation.hidden = true;
       renderTranscript({ anchor: "bottom", behavior: "auto" });
@@ -363,6 +378,7 @@ export function createWebchat({ root, api, getPageObservation, document = global
     try {
       const session = await api.getSession();
       messages = session.messages;
+      rememberSubmittedActions(messages);
       nodes.availability.textContent = "Online · Ready to help";
       clearError();
     } catch (error) {

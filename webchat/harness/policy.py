@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 import re
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from webchat.domain.common import BookingStatus, CustomerIdentity, require_aware
 from webchat.domain.vehicles import VehicleAvailability, VehicleAvailabilityStatus
@@ -64,8 +64,22 @@ class PolicyError(Exception):
 
 
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _default_phone_validator(value: str) -> bool:
+    digits = re.sub(r"\D", "", value)
+    return 10 <= len(digits) <= 15
+
+
 class PolicyEngine:
     """Apply hard rules independently of provider wording or tool visibility."""
+
+    def __init__(
+        self,
+        *,
+        phone_validator: Callable[[str], bool] | None = None,
+    ) -> None:
+        self._phone_validator = phone_validator or _default_phone_validator
 
     def customer_identity(
         self,
@@ -86,8 +100,7 @@ class PolicyEngine:
         phone = str(values["phone"]).strip()
         if not _EMAIL.fullmatch(email):
             invalid.append("email")
-        phone_digits = re.sub(r"\D", "", phone)
-        if not 10 <= len(phone_digits) <= 15:
+        if not self._phone_validator(phone):
             invalid.append("phone")
         if invalid:
             raise PolicyError(

@@ -221,6 +221,7 @@ test("server-issued action buttons submit their exact opaque reference", async (
     action: { action_id: "opaque-1", action_type: "show_more" },
     page_observation: { current_url: "/#vehicles", page_vehicle_id: "veh-003" },
   });
+  assert.equal(root.querySelector('[data-action-id="opaque-1"]').disabled, true);
 });
 
 test("Enter sends while Shift+Enter preserves a newline", async () => {

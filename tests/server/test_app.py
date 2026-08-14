@@ -124,6 +124,8 @@ class ChatApplicationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(self.runtime.requests[-1].current_input)
         self.assertEqual(self.runtime.requests[-1].action_reference.action_type, "show_more")
+        submission = response.json()["messages"][0]["blocks"][0]["payload"]
+        self.assertEqual(submission["action_id"], "server-action")
 
         invalid = await self.client.post(
             "/api/chat/turns",
