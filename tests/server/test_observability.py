@@ -4,12 +4,19 @@ from datetime import UTC, datetime
 
 from server.observability import (
     JsonEventLogger,
+    ObservedConversationProvider,
     ObservedDealerAdapter,
     ObservedGroundedResponseProvider,
     ObservedPlanningProvider,
     conversation_hash,
     log_context,
 )
+from webchat.harness.conversation import (
+    ConversationRequest,
+    ConversationResult,
+    ConversationUsage,
+)
+from webchat.harness.conversation_tools import conversation_tool_catalogue
 from webchat.harness.contracts import (
     ReadCommandName,
     ResponseStrategy,
@@ -87,6 +94,37 @@ class JsonEventLoggerTests(unittest.TestCase):
 
 
 class ExternalCallLoggingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_conversation_call_logs_metrics_without_context(self) -> None:
+        lines: list[str] = []
+        logger = JsonEventLogger(sink=lines.append)
+        result = ConversationResult(
+            text="A useful answer.",
+            usage=ConversationUsage(20, 5, 25),
+            latency_ms=3,
+            time_to_first_token_ms=2,
+            provider="fixture-provider",
+            model="fixture-model",
+        )
+
+        class Provider:
+            async def converse(self, request, *, on_text_delta=None):
+                return result
+
+        observed = ObservedConversationProvider(Provider(), logger=logger)
+        request = ConversationRequest(
+            context='{"current_input":"PRIVATE QUESTION"}',
+            tools=conversation_tool_catalogue(),
+        )
+
+        returned = await observed.converse(request)
+
+        self.assertIs(returned, result)
+        event = json.loads(lines[0])
+        self.assertEqual(event["operation"], "conversation")
+        self.assertEqual(event["input_tokens"], 20)
+        self.assertEqual(event["output_tokens"], 5)
+        self.assertNotIn("PRIVATE QUESTION", lines[0])
+
     async def test_dealer_call_records_operation_outcome_and_actual_retry_count(self) -> None:
         lines: list[str] = []
         logger = JsonEventLogger(sink=lines.append)

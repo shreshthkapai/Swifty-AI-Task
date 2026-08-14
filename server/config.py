@@ -78,8 +78,7 @@ def _http_base_url(value: str, name: str) -> str:
 class AppConfig:
     environment: str
     provider: str
-    response_model: str
-    planner_model: str
+    model: str
     openai_api_key: str = field(repr=False)
     northstar: NorthstarConfig = field(repr=False)
     openai_base_url: str = DEFAULT_OPENAI_BASE_URL
@@ -96,10 +95,8 @@ class AppConfig:
             raise ValueError("CHAT_ENVIRONMENT must be local, development, test, or production")
         if self.provider != "openai":
             raise ValueError("CHAT_PROVIDER must name a configured planning provider")
-        for name in ("response_model", "planner_model"):
-            value = getattr(self, name)
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"{name} must be a non-empty string")
+        if not isinstance(self.model, str) or not self.model.strip():
+            raise ValueError("model must be a non-empty string")
         if not isinstance(self.openai_api_key, str) or not self.openai_api_key.strip():
             raise ValueError("openai_api_key must be configured server-side")
         if not isinstance(self.northstar, NorthstarConfig):
@@ -164,15 +161,10 @@ class AppConfig:
                 values, "NORTHSTAR_POOL_TIMEOUT_SECONDS", 2.0
             ),
         )
-        response_model = _required(values, "CHAT_MODEL")
-        planner_model = values.get("CHAT_PLANNER_MODEL", response_model).strip()
-        if not planner_model:
-            raise ValueError("CHAT_PLANNER_MODEL must be a non-empty string")
         return cls(
             environment=environment,
             provider=provider,
-            response_model=response_model,
-            planner_model=planner_model,
+            model=_required(values, "CHAT_MODEL"),
             openai_api_key=_required(values, "OPENAI_API_KEY"),
             openai_base_url=_http_base_url(
                 values.get("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL),

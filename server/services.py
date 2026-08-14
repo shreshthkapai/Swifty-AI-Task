@@ -17,21 +17,20 @@ from webchat.adapters.northstar.adapter import (
 )
 from webchat.adapters.northstar.validation import customer_phone_is_valid
 from webchat.harness.policy import PolicyEngine
-from webchat.harness.planning import PlanningEngine, TurnRequest
-from webchat.harness.runtime import HarnessRuntime, TurnResult
+from webchat.harness.planning import TurnRequest
+from webchat.harness.runtime import TurnResult
+from webchat.harness.conversation_runtime import ConversationRuntime
 from webchat.persistence import ConversationStore, SQLiteConversationStore
 from webchat.providers.openai import (
-    OpenAIGroundedResponseProvider,
-    OpenAIPlanningProvider,
+    OpenAIConversationProvider,
     OpenAIProviderConfig,
 )
 
 from .config import AppConfig
 from .observability import (
     JsonEventLogger,
+    ObservedConversationProvider,
     ObservedDealerAdapter,
-    ObservedGroundedResponseProvider,
-    ObservedPlanningProvider,
 )
 
 
@@ -65,23 +64,13 @@ def build_services(
     dealer_http = httpx.AsyncClient(base_url=config.northstar.base_url)
     northstar = NorthstarAdapter(NorthstarClient(config.northstar, dealer_http))
     provider_http = httpx.AsyncClient()
-    planning_provider_config = OpenAIProviderConfig(
+    provider_config = OpenAIProviderConfig(
         api_key=config.openai_api_key,
-        model=config.planner_model,
+        model=config.model,
         base_url=config.openai_base_url,
         timeout_seconds=config.provider_timeout_seconds,
     )
-    response_provider_config = OpenAIProviderConfig(
-        api_key=config.openai_api_key,
-        model=config.response_model,
-        base_url=config.openai_base_url,
-        timeout_seconds=config.provider_timeout_seconds,
-    )
-    openai = OpenAIPlanningProvider(provider_http, planning_provider_config)
-    openai_grounded = OpenAIGroundedResponseProvider(
-        provider_http,
-        response_provider_config,
-    )
+    openai = OpenAIConversationProvider(provider_http, provider_config)
     selected_logger = logger or JsonEventLogger()
     dealer = ObservedDealerAdapter(
         northstar,
@@ -89,15 +78,10 @@ def build_services(
         retry_reset=reset_operation_retry_count,
         retry_count=operation_retry_count,
     )
-    provider = ObservedPlanningProvider(openai, logger=selected_logger)
-    grounded_response = ObservedGroundedResponseProvider(
-        openai_grounded,
-        logger=selected_logger,
-    )
-    runtime = HarnessRuntime(
+    provider = ObservedConversationProvider(openai, logger=selected_logger)
+    runtime = ConversationRuntime(
         dealer=dealer,
-        planning=PlanningEngine(provider),
-        grounded_response=grounded_response,
+        conversation=provider,
         policy=PolicyEngine(phone_validator=customer_phone_is_valid),
     )
     return ChatServices(

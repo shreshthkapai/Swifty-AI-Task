@@ -8,7 +8,6 @@ def valid_environment() -> dict[str, str]:
         "CHAT_ENVIRONMENT": "local",
         "CHAT_PROVIDER": "openai",
         "CHAT_MODEL": "response-model",
-        "CHAT_PLANNER_MODEL": "fast-planner-model",
         "OPENAI_API_KEY": "provider-secret",
         "NORTHSTAR_BASE_URL": "http://dealership-platform:4010",
         "NORTHSTAR_PUBLIC_BASE_URL": "http://localhost:4010",
@@ -28,8 +27,7 @@ class AppConfigTests(unittest.TestCase):
         config = AppConfig.from_env(valid_environment())
 
         self.assertEqual(config.provider, "openai")
-        self.assertEqual(config.response_model, "response-model")
-        self.assertEqual(config.planner_model, "fast-planner-model")
+        self.assertEqual(config.model, "response-model")
         self.assertEqual(config.northstar.base_url, "http://dealership-platform:4010")
         self.assertEqual(config.northstar.public_base_url, "http://localhost:4010")
         self.assertEqual(config.allowed_origin, "http://localhost:4173")
@@ -37,15 +35,6 @@ class AppConfigTests(unittest.TestCase):
         self.assertFalse(config.cookie_secure)
         self.assertNotIn("provider-secret", repr(config))
         self.assertNotIn("dealer-secret", repr(config))
-
-    def test_planner_model_defaults_to_response_model(self) -> None:
-        values = valid_environment()
-        del values["CHAT_PLANNER_MODEL"]
-
-        config = AppConfig.from_env(values)
-
-        self.assertEqual(config.response_model, "response-model")
-        self.assertEqual(config.planner_model, "response-model")
 
     def test_production_uses_secure_cookie(self) -> None:
         values = valid_environment()
@@ -82,8 +71,7 @@ class AppConfigTests(unittest.TestCase):
     def test_constructor_rejects_invalid_operational_bounds(self) -> None:
         baseline = AppConfig.from_env(valid_environment())
         fields = (
-            ("response_model", 123),
-            ("planner_model", ""),
+            ("model", 123),
             ("openai_api_key", None),
             ("database_path", "chat.sqlite3"),
             ("retention_days", 0),

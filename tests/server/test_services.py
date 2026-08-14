@@ -10,21 +10,17 @@ from .support import app_config
 
 
 class ServiceCompositionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_planner_and_grounded_response_use_their_configured_models(self) -> None:
+    async def test_runtime_uses_one_conversational_provider_and_model(self) -> None:
         with TemporaryDirectory() as directory:
             services = build_services(
-                app_config(
-                    Path(directory) / "chat.sqlite3",
-                    planner_model="fast-planner",
-                    response_model="strong-response",
-                )
+                app_config(Path(directory) / "chat.sqlite3", model="conversation-model")
             )
             try:
-                planner = services.runtime._planning._provider._provider
-                responder = services.runtime._grounded_response._provider
+                provider = services.runtime._conversation._provider
 
-                self.assertEqual(planner._config.model, "fast-planner")
-                self.assertEqual(responder._config.model, "strong-response")
+                self.assertEqual(provider._config.model, "conversation-model")
+                self.assertFalse(hasattr(services.runtime, "_planning"))
+                self.assertFalse(hasattr(services.runtime, "_grounded_response"))
             finally:
                 await services.aclose()
 
