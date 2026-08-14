@@ -780,6 +780,55 @@ class HarnessRuntimeTests(unittest.IsolatedAsyncioTestCase):
             provider.requests[0].context,
         )
 
+    async def test_cross_dealership_page_switch_drops_previous_slot_filter(self) -> None:
+        fake = dealer()
+        fake.get_vehicle_availability.return_value = availability()
+        fake.list_test_drive_slots.return_value = (
+            replace(
+                drive_slot(),
+                vehicle_id="veh-page",
+                dealership_id="northstar-stockport",
+                dealership_name="Northstar Stockport",
+            ),
+        )
+        plan = TurnPlan(
+            TurnScope.IN_DOMAIN,
+            (ReadCommand(ReadCommandName.FIND_TEST_DRIVE_SLOTS),),
+            ResponseStrategy.SLOT_RESULTS,
+        )
+        harness, _ = runtime(fake, plan)
+        state = ConversationState(
+            entities=EntityContext(
+                selected_vehicle_id="veh-previous",
+                selected_dealer_id="northstar-manchester",
+                selected_test_drive_slot_id="slot-for-previous",
+            ),
+            workflow=WorkflowState(
+                WorkflowDomain.TEST_DRIVE,
+                WorkflowStage.DISCOVERY,
+            ),
+        )
+        observation = PageContext(
+            current_url="/?vehicle=veh-page#vehicles",
+            page_vehicle_id="veh-page",
+            observed_at=NOW,
+        )
+
+        result = await harness.handle(TurnRequest(
+            current_input="What test-drive dates are available for this vehicle?",
+            state=state,
+            now=NOW,
+            page_observation=observation,
+        ))
+
+        search = fake.list_test_drive_slots.await_args.args[0]
+        self.assertEqual(search.vehicle_id, "veh-page")
+        self.assertIsNone(search.dealership_id)
+        self.assertEqual(
+            result.state.entities.selected_dealer_id,
+            "northstar-stockport",
+        )
+
     async def test_slot_intent_checks_availability_before_retrieving_slots(self) -> None:
         fake = dealer()
         calls = []

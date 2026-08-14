@@ -123,6 +123,7 @@ def _state_for_turn(request: TurnRequest) -> ConversationState:
         entities = replace(
             entities,
             selected_vehicle_id=page_vehicle_id,
+            selected_dealer_id=None,
             selected_test_drive_slot_id=None,
         )
     return replace(request.state, context=observation, entities=entities)
