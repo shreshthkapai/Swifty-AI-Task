@@ -44,9 +44,9 @@ class ScriptedConversationDriverTests(unittest.IsolatedAsyncioTestCase):
         observed = await driver.execute_turn(scenario, scenario.turns[0])
 
         self.assertEqual([item.name.value for item in observed.commands], ["search_vehicles"])
-        self.assertEqual(observed.input_tokens, 11)
-        self.assertEqual(observed.output_tokens, 7)
-        self.assertEqual(observed.latency_ms, 2.5)
+        self.assertEqual(observed.input_tokens, 111)
+        self.assertEqual(observed.output_tokens, 27)
+        self.assertEqual(observed.latency_ms, 3.5)
 
     async def test_free_text_uses_scripted_plan_through_real_runtime(self) -> None:
         scenario = load_corpus("evals/corpus.json").scenarios[0]
@@ -54,7 +54,7 @@ class ScriptedConversationDriverTests(unittest.IsolatedAsyncioTestCase):
 
         observed = await driver.execute_turn(scenario, scenario.turns[0])
 
-        self.assertEqual(observed.model_calls, 1)
+        self.assertEqual(observed.model_calls, 2)
         self.assertEqual([item.name.value for item in observed.commands], ["search_vehicles"])
         self.assertIn("search_vehicles", observed.external_calls)
 

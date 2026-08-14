@@ -18,12 +18,17 @@ from webchat.adapters.northstar.adapter import (
 from webchat.harness.planning import PlanningEngine, TurnRequest
 from webchat.harness.runtime import HarnessRuntime, TurnResult
 from webchat.persistence import ConversationStore, SQLiteConversationStore
-from webchat.providers.openai import OpenAIPlanningProvider, OpenAIProviderConfig
+from webchat.providers.openai import (
+    OpenAIGroundedResponseProvider,
+    OpenAIPlanningProvider,
+    OpenAIProviderConfig,
+)
 
 from .config import AppConfig
 from .observability import (
     JsonEventLogger,
     ObservedDealerAdapter,
+    ObservedGroundedResponseProvider,
     ObservedPlanningProvider,
 )
 
@@ -58,14 +63,22 @@ def build_services(
     dealer_http = httpx.AsyncClient(base_url=config.northstar.base_url)
     northstar = NorthstarAdapter(NorthstarClient(config.northstar, dealer_http))
     provider_http = httpx.AsyncClient()
-    openai = OpenAIPlanningProvider(
+    planning_provider_config = OpenAIProviderConfig(
+        api_key=config.openai_api_key,
+        model=config.planner_model,
+        base_url=config.openai_base_url,
+        timeout_seconds=config.provider_timeout_seconds,
+    )
+    response_provider_config = OpenAIProviderConfig(
+        api_key=config.openai_api_key,
+        model=config.response_model,
+        base_url=config.openai_base_url,
+        timeout_seconds=config.provider_timeout_seconds,
+    )
+    openai = OpenAIPlanningProvider(provider_http, planning_provider_config)
+    openai_grounded = OpenAIGroundedResponseProvider(
         provider_http,
-        OpenAIProviderConfig(
-            api_key=config.openai_api_key,
-            model=config.model,
-            base_url=config.openai_base_url,
-            timeout_seconds=config.provider_timeout_seconds,
-        ),
+        response_provider_config,
     )
     selected_logger = logger or JsonEventLogger()
     dealer = ObservedDealerAdapter(
@@ -75,7 +88,15 @@ def build_services(
         retry_count=operation_retry_count,
     )
     provider = ObservedPlanningProvider(openai, logger=selected_logger)
-    runtime = HarnessRuntime(dealer=dealer, planning=PlanningEngine(provider))
+    grounded_response = ObservedGroundedResponseProvider(
+        openai_grounded,
+        logger=selected_logger,
+    )
+    runtime = HarnessRuntime(
+        dealer=dealer,
+        planning=PlanningEngine(provider),
+        grounded_response=grounded_response,
+    )
     return ChatServices(
         runtime=runtime,
         store=store,

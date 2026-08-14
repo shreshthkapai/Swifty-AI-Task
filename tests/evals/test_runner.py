@@ -41,19 +41,19 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    def test_callback_time_requires_the_same_explicit_clock_time(self) -> None:
+    def test_callback_time_requires_a_non_empty_semantic_preference(self) -> None:
         self.assertTrue(
             _arguments_satisfy(
                 "prepare_callback",
-                {"preferred_time": "2026-08-14T14:00:00+00:00"},
-                {"preferred_time": "2026-08-14T14:00:00"},
+                {"preferred_time": "exactly 2pm tomorrow"},
+                {"preferred_time": "2026-08-14 14:00"},
             )
         )
         self.assertFalse(
             _arguments_satisfy(
                 "prepare_callback",
-                {"preferred_time": "2026-08-14T14:00:00+00:00"},
-                {"preferred_time": "2026-08-15T14:00:00"},
+                {"preferred_time": "exactly 2pm tomorrow"},
+                {"preferred_time": None},
             )
         )
 
@@ -79,6 +79,13 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
                 "prepare_dealership_message",
                 {"dealership_query": "Stockport", "department": "service"},
                 {"dealership_query": "Bolton", "department": "service"},
+            )
+        )
+        self.assertFalse(
+            _arguments_satisfy(
+                "prepare_dealership_message",
+                {"message": "I will be ten minutes late."},
+                {"message": ""},
             )
         )
     async def test_detailed_run_retains_each_input_observation_and_score(self) -> None:
@@ -133,7 +140,7 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
                 strategy="domain_redirect",
                 text=(
                     "I can help with vehicles, test drives, sales, servicing, and "
-                    "Northstar dealership information."
+                    "dealership information."
                 ),
                 direct=True,
             )
@@ -384,7 +391,7 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
                 strategy="domain_redirect",
                 text=(
                     "I can help with vehicles, test drives, sales, servicing, and "
-                    "Northstar dealership information."
+                    "dealership information."
                 ),
                 direct=True,
             ),

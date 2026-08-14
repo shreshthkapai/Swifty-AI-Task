@@ -115,18 +115,5 @@ class PolicyEngineTests(unittest.TestCase):
             self.policy.require_booking_amendable(booking(BookingStatus.CANCELLED))
         self.assertEqual(raised.exception.code, PolicyCode.BOOKING_CANCELLED)
 
-    def test_adjacent_advice_cannot_claim_dealership_inventory_or_prices(self) -> None:
-        self.assertTrue(
-            self.policy.is_safe_adjacent_advice(
-                "Compare rear-seat space, boot capacity, and running costs."
-            )
-        )
-        self.assertFalse(
-            self.policy.is_safe_adjacent_advice(
-                "Northstar has five SUVs in stock under £30,000."
-            )
-        )
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,8 @@ def valid_environment() -> dict[str, str]:
     return {
         "CHAT_ENVIRONMENT": "local",
         "CHAT_PROVIDER": "openai",
-        "CHAT_MODEL": "planner-model",
+        "CHAT_MODEL": "response-model",
+        "CHAT_PLANNER_MODEL": "fast-planner-model",
         "OPENAI_API_KEY": "provider-secret",
         "NORTHSTAR_BASE_URL": "http://dealership-platform:4010",
         "NORTHSTAR_API_KEY": "dealer-secret",
@@ -26,7 +27,8 @@ class AppConfigTests(unittest.TestCase):
         config = AppConfig.from_env(valid_environment())
 
         self.assertEqual(config.provider, "openai")
-        self.assertEqual(config.model, "planner-model")
+        self.assertEqual(config.response_model, "response-model")
+        self.assertEqual(config.planner_model, "fast-planner-model")
         self.assertEqual(config.northstar.base_url, "http://dealership-platform:4010")
         self.assertEqual(config.allowed_origin, "http://localhost:4173")
         self.assertEqual(config.retention_seconds, 7 * 24 * 60 * 60)
@@ -34,12 +36,27 @@ class AppConfigTests(unittest.TestCase):
         self.assertNotIn("provider-secret", repr(config))
         self.assertNotIn("dealer-secret", repr(config))
 
+    def test_planner_model_defaults_to_response_model(self) -> None:
+        values = valid_environment()
+        del values["CHAT_PLANNER_MODEL"]
+
+        config = AppConfig.from_env(values)
+
+        self.assertEqual(config.response_model, "response-model")
+        self.assertEqual(config.planner_model, "response-model")
+
     def test_production_uses_secure_cookie(self) -> None:
         values = valid_environment()
         values["CHAT_ENVIRONMENT"] = "production"
         values["CHAT_ALLOWED_ORIGIN"] = "https://www.northstar.example"
 
         self.assertTrue(AppConfig.from_env(values).cookie_secure)
+
+    def test_provider_timeout_defaults_to_thirty_seconds(self) -> None:
+        values = valid_environment()
+        del values["CHAT_PROVIDER_TIMEOUT_SECONDS"]
+
+        self.assertEqual(AppConfig.from_env(values).provider_timeout_seconds, 30.0)
 
     def test_rejects_missing_secrets_unknown_provider_and_non_origin_cors(self) -> None:
         cases = (
@@ -63,7 +80,8 @@ class AppConfigTests(unittest.TestCase):
     def test_constructor_rejects_invalid_operational_bounds(self) -> None:
         baseline = AppConfig.from_env(valid_environment())
         fields = (
-            ("model", 123),
+            ("response_model", 123),
+            ("planner_model", ""),
             ("openai_api_key", None),
             ("database_path", "chat.sqlite3"),
             ("retention_days", 0),

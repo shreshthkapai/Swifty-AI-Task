@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 import unittest
 
-from webchat.domain.common import Money
+from webchat.domain.common import Money, Page
 from webchat.domain.dealerships import BusinessInformation
 from webchat.domain.vehicles import VehicleDetails, VehicleOffer
 from webchat.domain.workshop import WorkshopService
@@ -15,7 +15,12 @@ from webchat.harness.contracts import (
     TurnScope,
 )
 from webchat.harness.planning import TurnRequest
-from webchat.harness.state import ConversationState
+from webchat.harness.state import (
+    ConversationState,
+    WorkflowDomain,
+    WorkflowStage,
+    WorkflowState,
+)
 from webchat.harness.workflows.references import resolve_dealership_reference
 
 from tests.webchat.harness.test_mutations import workshop_slot
@@ -39,9 +44,26 @@ class ReadWorkflowTests(unittest.IsolatedAsyncioTestCase):
             strategy,
         )
         harness, _ = runtime(fake, plan)
+        if name in {
+            ReadCommandName.GET_VEHICLE_DETAILS,
+            ReadCommandName.COMPARE_VEHICLES,
+            ReadCommandName.CHECK_VEHICLE_AVAILABILITY,
+            ReadCommandName.LIST_NEW_CAR_OFFERS,
+        }:
+            domain = WorkflowDomain.VEHICLES
+        elif name in {
+            ReadCommandName.LIST_WORKSHOP_SERVICES,
+            ReadCommandName.LIST_WORKSHOP_LOCATIONS,
+            ReadCommandName.FIND_WORKSHOP_SLOTS,
+        }:
+            domain = WorkflowDomain.WORKSHOP
+        else:
+            domain = WorkflowDomain.DEALERSHIP
         return await harness.handle(TurnRequest(
             current_input="Dealership information request",
-            state=ConversationState(),
+            state=ConversationState(
+                workflow=WorkflowState(domain, WorkflowStage.DISCOVERY)
+            ),
             now=NOW,
         ))
 
@@ -83,7 +105,69 @@ class ReadWorkflowTests(unittest.IsolatedAsyncioTestCase):
         for name, arguments, strategy, configure, expected_blocks in cases:
             with self.subTest(command=name):
                 result = await self._read(name, arguments, strategy, configure)
-                self.assertEqual({block.kind for block in result.blocks}, expected_blocks)
+                self.assertEqual(
+                    {block.kind for block in result.blocks},
+                    expected_blocks | {"text"},
+                )
+                self.assertTrue(result.evidence)
+
+    async def test_vehicle_search_excludes_one_exact_vehicle_without_excluding_its_model(self) -> None:
+        fake = dealer()
+        first = replace(vehicle("veh-volvo-1"), make="Volvo", model="XC40")
+        second = replace(vehicle("veh-volvo-2"), make="Volvo", model="XC40")
+        fake.search_vehicles.return_value = Page((first, second), 1, 10, 2, 1)
+        plan = TurnPlan(
+            TurnScope.IN_DOMAIN,
+            (ReadCommand.from_mapping(ReadCommandName.SEARCH_VEHICLES, {
+                "fuel_type": "Electric",
+                "body_style": "SUV",
+                "exclude_vehicle_ids": ["veh-volvo-1"],
+            }),),
+            ResponseStrategy.SEARCH_RESULTS,
+        )
+        harness, _ = runtime(fake, plan)
+
+        result = await harness.handle(TurnRequest(
+            current_input="Anything except that exact one?",
+            state=ConversationState(),
+            now=NOW,
+        ))
+
+        cards = next(block for block in result.blocks if block.kind == "vehicle_cards")
+        self.assertEqual(
+            [item["id"] for item in cards.to_dict()["payload"]["vehicles"]],
+            ["veh-volvo-2"],
+        )
+        saved_search = result.state.workflow.gathered_fields_dict()["last_vehicle_search"]
+        self.assertEqual(saved_search["exclude_vehicle_ids"], ["veh-volvo-1"])
+
+    async def test_vehicle_search_can_exclude_a_whole_model_without_excluding_make(self) -> None:
+        fake = dealer()
+        xc40 = replace(vehicle("veh-xc40"), make="Volvo", model="XC40")
+        ex30 = replace(vehicle("veh-ex30"), make="Volvo", model="EX30")
+        fake.search_vehicles.return_value = Page((xc40, ex30), 1, 10, 2, 1)
+        plan = TurnPlan(
+            TurnScope.IN_DOMAIN,
+            (ReadCommand.from_mapping(ReadCommandName.SEARCH_VEHICLES, {
+                "fuel_type": "Electric",
+                "body_style": "SUV",
+                "exclude_models": ["XC40"],
+            }),),
+            ResponseStrategy.SEARCH_RESULTS,
+        )
+        harness, _ = runtime(fake, plan)
+
+        result = await harness.handle(TurnRequest(
+            current_input="Anything other than the XC40?",
+            state=ConversationState(),
+            now=NOW,
+        ))
+
+        cards = next(block for block in result.blocks if block.kind == "vehicle_cards")
+        self.assertEqual(
+            [item["id"] for item in cards.to_dict()["payload"]["vehicles"]],
+            ["veh-ex30"],
+        )
 
     async def test_workshop_catalogue_locations_and_slots(self) -> None:
         service = WorkshopService(
@@ -111,6 +195,7 @@ class ReadWorkflowTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(command=name):
                 result = await self._read(name, arguments, strategy, configure)
                 self.assertIn(expected_block, {block.kind for block in result.blocks})
+                self.assertTrue(result.evidence)
 
     async def test_dealership_list_details_and_business_notices(self) -> None:
         information = BusinessInformation(
@@ -139,6 +224,7 @@ class ReadWorkflowTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(command=name):
                 result = await self._read(name, arguments, strategy, configure)
                 self.assertIn(expected_block, {block.kind for block in result.blocks})
+                self.assertTrue(result.evidence)
 
     async def test_customer_facing_dealership_reference_resolves_to_stable_id(self) -> None:
         fake = dealer()
@@ -177,7 +263,10 @@ class ReadWorkflowTests(unittest.IsolatedAsyncioTestCase):
             result.state.entities.selected_dealer_id,
             "northstar-liverpool",
         )
-        self.assertEqual(result.blocks[0].kind, "dealerships")
+        self.assertIn(
+            "Liverpool",
+            {getattr(item, "value", None) for item in result.evidence},
+        )
 
     async def test_reference_resolver_does_not_guess_unknown_location(self) -> None:
         fake = dealer()

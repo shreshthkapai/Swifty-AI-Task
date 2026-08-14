@@ -12,6 +12,7 @@ from webchat.harness.contracts import (
     PreparationCommandName,
     ReadCommand,
     ReadCommandName,
+    ResponseMode,
     ResponseStrategy,
     TurnPlan,
     TurnScope,
@@ -198,8 +199,7 @@ class PlanningEngineTests(unittest.IsolatedAsyncioTestCase):
         plan = TurnPlan(
             scope=TurnScope.DEALERSHIP_ADJACENT,
             commands=(),
-            response_strategy=ResponseStrategy.ADJACENT_ADVICE,
-            adjacent_advice="An SUV can be practical for five; compare rear and boot space.",
+            response_strategy=ResponseStrategy.GENERAL_GUIDANCE,
         )
         request = TurnRequest(
             current_input="Is an SUV practical for a family of five?",
@@ -328,12 +328,13 @@ class PlanningEngineTests(unittest.IsolatedAsyncioTestCase):
             )
     def test_raw_provider_output_is_strictly_parsed(self) -> None:
         valid = {
-            "schema_version": 1,
+            "schema_version": 2,
             "scope": "in_domain",
             "commands": [
                 {"name": "search_vehicles", "arguments": {"make": "BMW"}}
             ],
             "response_strategy": "search_results",
+            "response_mode": "grounded_answer",
         }
 
         parsed = parse_planning_output(valid, allowed_commands={"search_vehicles"})
@@ -352,7 +353,7 @@ class PlanningEngineTests(unittest.IsolatedAsyncioTestCase):
     def test_raw_command_plan_canonicalizes_nonexecuting_response_metadata(self) -> None:
         parsed = parse_planning_output(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "scope": "in_domain",
                 "commands": [
                     {"name": "check_vehicle_availability", "arguments": {"vehicle_id": "veh-007"}}
@@ -365,6 +366,52 @@ class PlanningEngineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(parsed.response_strategy, ResponseStrategy.AVAILABILITY_RESULT)
         self.assertIsNone(parsed.clarification_question)
+
+    def test_raw_plan_converts_conflicting_price_bounds_to_clarification(self) -> None:
+        parsed = parse_planning_output(
+            {
+                "schema_version": 2,
+                "scope": "in_domain",
+                "commands": [
+                    {
+                        "name": "search_vehicles",
+                        "arguments": {
+                            "min_price_minor": 5_000_000,
+                            "max_price_minor": 3_000_000,
+                        },
+                    }
+                ],
+                "response_strategy": "search_results",
+                "response_mode": "grounded_answer",
+            },
+            allowed_commands={"search_vehicles"},
+        )
+
+        self.assertEqual(parsed.commands, ())
+        self.assertIs(parsed.response_strategy, ResponseStrategy.MISSING_INFORMATION)
+        self.assertIs(parsed.response_mode, ResponseMode.CLARIFICATION)
+        self.assertIn("minimum price", parsed.clarification_question)
+        self.assertIn("maximum price", parsed.clarification_question)
+
+    def test_allowed_read_canonicalizes_adjacent_scope_to_mixed(self) -> None:
+        parsed = parse_planning_output(
+            {
+                "schema_version": 2,
+                "scope": "dealership_adjacent",
+                "commands": [
+                    {
+                        "name": "search_vehicles",
+                        "arguments": {"query": "family car", "availability": "available"},
+                    }
+                ],
+                "response_strategy": "search_results",
+                "response_mode": "grounded_answer",
+                "clarification_question": None,
+            },
+            allowed_commands={"search_vehicles"},
+        )
+
+        self.assertIs(parsed.scope, TurnScope.MIXED)
 
     def test_planning_provider_is_a_structural_async_protocol(self) -> None:
         plan = TurnPlan(

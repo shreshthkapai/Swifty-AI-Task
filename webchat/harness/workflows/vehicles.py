@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -18,6 +18,7 @@ from webchat.domain.vehicles import (
 )
 
 from ..contracts import ReadCommandName
+from ..evidence import EvidenceFreshness
 from ..policy import PolicyEngine
 from ..render import DeclarativeRenderer
 from ..state import (
@@ -35,7 +36,35 @@ from .common import (
     presentation_group,
     workflow_state,
 )
+from .facts import (
+    availability_evidence,
+    offer_evidence,
+    result_count_evidence,
+    vehicle_details_evidence,
+    vehicle_search_evidence,
+)
 from .references import resolve_dealership_for_command
+
+
+MAX_EXCLUSION_SCAN_PAGES = 10
+
+
+@dataclass(frozen=True, slots=True)
+class _VehicleExclusions:
+    vehicle_ids: tuple[str, ...] = ()
+    models: tuple[str, ...] = ()
+    makes: tuple[str, ...] = ()
+
+    @property
+    def active(self) -> bool:
+        return bool(self.vehicle_ids or self.models or self.makes)
+
+    def to_evidence(self) -> dict[str, tuple[str, ...]]:
+        return {
+            "exclude_vehicle_ids": self.vehicle_ids,
+            "exclude_models": self.models,
+            "exclude_makes": self.makes,
+        }
 
 
 async def execute_vehicle_read(
@@ -64,14 +93,24 @@ async def execute_vehicle_read(
             return failure
         search_arguments["dealership_id"] = dealership_id
         refinement = search_arguments.pop("refinement", None)
+        clear_filters = frozenset(search_arguments.pop("clear_filters", ()) or ())
+        exclusions = _vehicle_exclusions(search_arguments)
         if refinement is not None and search_arguments.get("max_price_minor") is None:
             ceiling = await _refinement_ceiling(dealer, refinement, state)
             if ceiling is not None:
                 search_arguments["max_price_minor"] = ceiling.amount_minor
                 search_arguments["currency"] = ceiling.currency
-        search = _vehicle_search(search_arguments, state)
-        page = await dealer.search_vehicles(search)
-        return _search_result(page, search, state=state, now=now, renderer=renderer, id_factory=id_factory)
+        search = _vehicle_search(search_arguments, state, clear_filters=clear_filters)
+        page = await _search_with_exclusions(dealer, search, exclusions)
+        return _search_result(
+            page,
+            search,
+            exclusions=exclusions,
+            state=state,
+            now=now,
+            renderer=renderer,
+            id_factory=id_factory,
+        )
 
     if name is ReadCommandName.GET_VEHICLE_DETAILS:
         vehicle_id = _vehicle_id(arguments, state)
@@ -97,6 +136,7 @@ async def execute_vehicle_read(
                 ),
                 renderer.link(label="View on website", href=f"/?vehicle={vehicle_id}", entity_id=vehicle_id),
             ),
+            vehicle_details_evidence(details),
         )
 
     if name is ReadCommandName.COMPARE_VEHICLES:
@@ -107,7 +147,18 @@ async def execute_vehicle_read(
                 (renderer.notice("Please choose at least two vehicles to compare.", code="comparison_requires_vehicles"),),
             )
         details = [await dealer.get_vehicle(vehicle_id) for vehicle_id in ids[:3]]
-        return CommandOutcome(state, (renderer.comparison(tuple(item.vehicle for item in details)),))
+        return CommandOutcome(
+            state,
+            (renderer.comparison(tuple(item.vehicle for item in details)),),
+            tuple(
+                fact
+                for item in details
+                for fact in vehicle_details_evidence(
+                    item,
+                    source_operation="compare_vehicles",
+                )
+            ),
+        )
 
     if name is ReadCommandName.CHECK_VEHICLE_AVAILABILITY:
         vehicle_id = _vehicle_id(arguments, state)
@@ -143,6 +194,7 @@ async def execute_vehicle_read(
         return CommandOutcome(
             replace(state, entities=replace(state.entities, selected_vehicle_id=vehicle_id)),
             tuple(blocks),
+            availability_evidence(availability, observed_at=now),
         )
 
     if name is ReadCommandName.LIST_NEW_CAR_OFFERS:
@@ -170,26 +222,42 @@ async def execute_vehicle_read(
         return CommandOutcome(
             workflow_state(state, domain=WorkflowDomain.VEHICLES, stage=WorkflowStage.DISCOVERY),
             (renderer.records("offer_cards", records, entity_type="offer", entity_ids=tuple(offer.id for offer in offers)),),
+            result_count_evidence(
+                "list_new_car_offers",
+                "offer_catalogue",
+                len(offers),
+                observed_at=now,
+                freshness=EvidenceFreshness.SNAPSHOT,
+            )
+            + tuple(fact for offer in offers for fact in offer_evidence(offer, observed_at=now)),
         )
     return None
 
 
-def _vehicle_search(arguments: Mapping[str, Any], state: ConversationState) -> VehicleSearch:
+def _vehicle_search(
+    arguments: Mapping[str, Any],
+    state: ConversationState,
+    *,
+    clear_filters: frozenset[str] = frozenset(),
+) -> VehicleSearch:
     preferences = state.preferences
-    make = optional(arguments, "make", preferences.makes[0] if preferences.makes else None)
-    model = optional(arguments, "model", preferences.models[0] if preferences.models else None)
+    retained = lambda field, fallback: (
+        None if field in clear_filters else optional(arguments, field, fallback)
+    )
+    make = retained("make", preferences.makes[0] if preferences.makes else None)
+    model = retained("model", preferences.models[0] if preferences.models else None)
     currency = optional(arguments, "currency", preferences.currency or "GBP")
     return VehicleSearch(
         query=arguments.get("query"),
         make=make,
         model=model,
-        fuel_type=optional(arguments, "fuel_type", preferences.fuel),
-        transmission=optional(arguments, "transmission", preferences.transmission),
-        body_style=optional(arguments, "body_style", preferences.body_type),
+        fuel_type=retained("fuel_type", preferences.fuel),
+        transmission=retained("transmission", preferences.transmission),
+        body_style=retained("body_style", preferences.body_type),
         availability=enum_value(VehicleAvailabilityStatus, arguments.get("availability"), "availability"),
         dealership_id=optional(arguments, "dealership_id", state.entities.selected_dealer_id),
-        min_price=money_from_minor(optional(arguments, "min_price_minor", preferences.minimum_price_minor), currency),
-        max_price=money_from_minor(optional(arguments, "max_price_minor", preferences.maximum_price_minor), currency),
+        min_price=money_from_minor(retained("min_price_minor", preferences.minimum_price_minor), currency),
+        max_price=money_from_minor(retained("max_price_minor", preferences.maximum_price_minor), currency),
         max_mileage=arguments.get("max_mileage"),
         min_year=arguments.get("min_year"),
         sort=enum_value(VehicleSort, arguments.get("sort"), "sort", VehicleSort.NEWEST),
@@ -202,6 +270,7 @@ def _search_result(
     page: Page[Vehicle],
     search: VehicleSearch,
     *,
+    exclusions: _VehicleExclusions = _VehicleExclusions(),
     state: ConversationState,
     now: datetime,
     renderer: DeclarativeRenderer,
@@ -221,12 +290,18 @@ def _search_result(
         replace(state, preferences=preferences),
         domain=WorkflowDomain.VEHICLES,
         stage=WorkflowStage.REFINING,
-        gathered={"last_vehicle_search": _search_snapshot(search)},
+        gathered={"last_vehicle_search": _search_snapshot(search, exclusions)},
     )
     if not page.items:
         return CommandOutcome(
             next_state,
-            (renderer.notice("I couldn't find matching vehicles. Try relaxing one of the filters.", code="no_vehicle_results"),),
+            (),
+            vehicle_search_evidence(
+                page,
+                search,
+                observed_at=now,
+                exclusions=exclusions.to_evidence(),
+            ),
         )
     cards = renderer.vehicle_cards(page.items)
     group = presentation_group(
@@ -235,8 +310,15 @@ def _search_result(
         records=tuple((item.id, {
             "make": item.make,
             "model": item.model,
+            "variant": item.variant,
+            "year": item.year,
             "price_minor": None if item.price is None else item.price.amount_minor,
             "currency": None if item.price is None else item.price.currency,
+            "mileage": item.mileage,
+            "fuel_type": item.fuel_type,
+            "transmission": item.transmission,
+            "body_style": item.body_style,
+            "availability": item.availability.value,
         }) for item in page.items),
         block=cards,
         now=now,
@@ -245,11 +327,93 @@ def _search_result(
     blocks = [cards]
     if page.page < page.total_pages:
         blocks.append(renderer.actions((("show_more", "Show more", group.group_id),)))
-    return CommandOutcome(next_state, tuple(blocks))
+    return CommandOutcome(
+        next_state,
+        tuple(blocks),
+        vehicle_search_evidence(
+            page,
+            search,
+            observed_at=now,
+            exclusions=exclusions.to_evidence(),
+        ),
+    )
 
 
-def _search_snapshot(search: VehicleSearch) -> dict[str, Any]:
-    return {
+def _vehicle_exclusions(arguments: dict[str, Any]) -> _VehicleExclusions:
+    return _VehicleExclusions(
+        vehicle_ids=_exclusion_values(
+            arguments.pop("exclude_vehicle_ids", None),
+            "exclude_vehicle_ids",
+        ),
+        models=_exclusion_values(
+            arguments.pop("exclude_models", None),
+            "exclude_models",
+        ),
+        makes=_exclusion_values(
+            arguments.pop("exclude_makes", None),
+            "exclude_makes",
+        ),
+    )
+
+
+def _exclusion_values(value: object, field_name: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item.strip() for item in value
+    ):
+        raise ValueError(f"{field_name} must contain non-empty strings")
+    normalized = tuple(item.strip() for item in value)
+    if len(normalized) != len(set(item.casefold() for item in normalized)):
+        raise ValueError(f"{field_name} cannot contain duplicates")
+    return normalized
+
+
+def _excluded(vehicle: Vehicle, exclusions: _VehicleExclusions) -> bool:
+    excluded_models = {item.casefold() for item in exclusions.models}
+    excluded_makes = {item.casefold() for item in exclusions.makes}
+    return (
+        vehicle.id in exclusions.vehicle_ids
+        or vehicle.model.casefold() in excluded_models
+        or vehicle.make.casefold() in excluded_makes
+    )
+
+
+async def _search_with_exclusions(
+    dealer: DealerAdapter,
+    search: VehicleSearch,
+    exclusions: _VehicleExclusions,
+) -> Page[Vehicle]:
+    first = await dealer.search_vehicles(search)
+    if not exclusions.active:
+        return first
+    pages = [first]
+    next_page = first.page + 1
+    while next_page <= first.total_pages and len(pages) < MAX_EXCLUSION_SCAN_PAGES:
+        pages.append(await dealer.search_vehicles(replace(search, page=next_page)))
+        next_page += 1
+    filtered = tuple(
+        item
+        for page in pages
+        for item in page.items
+        if not _excluded(item, exclusions)
+    )
+    visible = filtered[:search.page_size]
+    exhausted = next_page > first.total_pages
+    total_items = len(filtered) if exhausted else max(len(filtered), len(visible))
+    total_pages = (
+        0
+        if total_items == 0
+        else (total_items + search.page_size - 1) // search.page_size
+    )
+    return Page(visible, 1, search.page_size, total_items, total_pages)
+
+
+def _search_snapshot(
+    search: VehicleSearch,
+    exclusions: _VehicleExclusions = _VehicleExclusions(),
+) -> dict[str, Any]:
+    snapshot = {
         "query": search.query, "make": search.make, "model": search.model,
         "fuel_type": search.fuel_type, "transmission": search.transmission,
         "body_style": search.body_style,
@@ -261,6 +425,12 @@ def _search_snapshot(search: VehicleSearch) -> dict[str, Any]:
         "max_mileage": search.max_mileage, "min_year": search.min_year,
         "sort": search.sort.value, "page": search.page, "page_size": search.page_size,
     }
+    snapshot.update({
+        field_name: list(values)
+        for field_name, values in exclusions.to_evidence().items()
+        if values
+    })
+    return snapshot
 
 
 def _vehicle_id(arguments: Mapping[str, Any], state: ConversationState) -> str | None:

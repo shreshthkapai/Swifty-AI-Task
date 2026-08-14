@@ -1,17 +1,15 @@
 # Documentation
 
-The authored integration documents follow the progression from discovery to a verified adapter:
+## Reviewer reading order
 
-1. [Dealer Integration Process](./design/DEALER-INTEGRATION-PROCESS.md) defines the repeatable inspection and mapping method.
-2. [Northstar Adapter Specification](./design/NORTHSTAR-ADAPTER-SPEC.md) records Northstar capabilities, validation, errors, mutations, and business constraints.
-3. [Dealership Domain Contracts](./design/DEALERSHIP-DOMAIN-CONTRACTS.md) defines the dealer-independent models and adapter protocol.
-4. [Northstar Adapter Implementation](./design/NORTHSTAR-ADAPTER-IMPLEMENTATION.md) explains the HTTP boundary and its verification strategy.
-5. [Full Corpus Evaluation](./design/FULL-CORPUS-EVALUATION.md) defines executable conversational scoring and reviewer evidence.
+1. [Product Brief](../PRODUCT-BRIEF.md): supplied requirements and marking context.
+2. [Solution Architecture](./ARCHITECTURE.md): implementation boundaries, runtime decisions, safety,
+   portability, and verification.
+3. Supplied platform references:
+   - [Integration Guide](./INTEGRATION-GUIDE.md)
+   - [Business Semantics](./BUSINESS-SEMANTICS.md)
+   - [Seeded Scenarios](./SEEDED-SCENARIOS.md)
+   - [OpenAPI contract](../dealership-platform/openapi.json)
 
-Supplied platform references remain the source of Northstar business behaviour:
-
-- [Integration Guide](./INTEGRATION-GUIDE.md)
-- [Business Semantics](./BUSINESS-SEMANTICS.md)
-- [Seeded Scenarios](./SEEDED-SCENARIOS.md)
-- [OpenAPI contract](../dealership-platform/openapi.json)
-- [Product Brief](../PRODUCT-BRIEF.md)
+The supplied references are authoritative for Northstar behaviour. The architecture document
+explains how that behaviour is normalized behind reusable dealer and model-provider boundaries.

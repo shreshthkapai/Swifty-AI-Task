@@ -19,7 +19,8 @@ def app_config(database_path: Path, **changes: Any) -> AppConfig:
     values = {
         "environment": "test",
         "provider": "openai",
-        "model": "fixture-model",
+        "response_model": "fixture-response-model",
+        "planner_model": "fixture-planner-model",
         "openai_api_key": "provider-secret",
         "northstar": NorthstarConfig(
             "http://dealership-platform:4010", "dealer-secret"

@@ -72,6 +72,11 @@ class ConversationStateTests(unittest.TestCase):
             context=PageContext(
                 current_url="http://localhost:4173/?vehicle=veh-019",
                 page_vehicle_id="veh-019",
+                search_filters={
+                    "make": "BMW",
+                    "body_style": "SUV",
+                    "max_price_minor": 3_000_000,
+                },
                 observed_at=self.now,
             ),
             entities=EntityContext(
@@ -102,6 +107,10 @@ class ConversationStateTests(unittest.TestCase):
         self.assertEqual(restored, state)
         self.assertEqual(restored.schema_version, 1)
         self.assertFalse(restored.context.is_authoritative)
+        self.assertEqual(
+            restored.context.search_filters_dict(),
+            {"body_style": "SUV", "make": "BMW", "max_price_minor": 3_000_000},
+        )
         self.assertEqual(restored.entities.selected_vehicle_id, "veh-019")
         self.assertFalse(restored.presentation_groups[0].is_authoritative)
 
@@ -210,6 +219,12 @@ class ConversationStateTests(unittest.TestCase):
         self.assertFalse(restored.context.is_authoritative)
         self.assertEqual(restored.context.page_vehicle_id, "veh-page")
         self.assertEqual(restored.entities.selected_vehicle_id, "veh-selected")
+
+    def test_browser_page_context_rejects_unknown_or_non_scalar_search_filters(self) -> None:
+        with self.assertRaisesRegex(ValueError, "search_filters"):
+            PageContext(search_filters={"customer_email": "alex@example.com"})
+        with self.assertRaisesRegex(ValueError, "search_filters"):
+            PageContext(search_filters={"make": ["BMW"]})
 
     def test_vehicle_preference_currency_rejects_non_ascii_codes(self) -> None:
         with self.assertRaisesRegex(ValueError, "ISO 4217"):

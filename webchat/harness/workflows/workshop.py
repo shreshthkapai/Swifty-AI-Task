@@ -13,6 +13,7 @@ from webchat.domain.workshop import WorkshopBookingLookup, WorkshopSlotSearch
 
 from ..actions import PendingActionType, PendingRequestType
 from ..contracts import PreparationCommandName, ReadCommandName
+from ..evidence import EvidenceFreshness
 from ..policy import PolicyCode, PolicyEngine, PolicyError
 from ..render import DeclarativeRenderer
 from ..state import ConversationState, CustomerState, VerificationGrant, WorkflowDomain, WorkflowStage
@@ -27,6 +28,13 @@ from .common import (
     prepare_action,
     presentation_group,
     workflow_state,
+)
+from .facts import (
+    location_evidence,
+    result_count_evidence,
+    workshop_booking_evidence,
+    workshop_service_evidence,
+    workshop_slot_evidence,
 )
 from .references import resolve_dealership_for_command
 
@@ -55,6 +63,17 @@ async def execute_workshop_read(
         return CommandOutcome(
             workflow_state(state, domain=WorkflowDomain.WORKSHOP, stage=WorkflowStage.DISCOVERY),
             (renderer.records("workshop_services", records, entity_type="workshop_service", entity_ids=tuple(item.id for item in services)),),
+            result_count_evidence(
+                "list_workshop_services",
+                "workshop_service_catalogue",
+                len(services),
+                observed_at=now,
+                freshness=EvidenceFreshness.STABLE,
+            ) + tuple(
+                fact
+                for item in services
+                for fact in workshop_service_evidence(item, observed_at=now)
+            ),
         )
 
     if name is ReadCommandName.LIST_WORKSHOP_LOCATIONS:
@@ -62,6 +81,21 @@ async def execute_workshop_read(
         return CommandOutcome(
             workflow_state(state, domain=WorkflowDomain.WORKSHOP, stage=WorkflowStage.DISCOVERY),
             (_locations_block(locations, renderer),),
+            result_count_evidence(
+                "list_workshop_locations",
+                "workshop_location_catalogue",
+                len(locations),
+                observed_at=now,
+                freshness=EvidenceFreshness.STABLE,
+            ) + tuple(
+                fact
+                for item in locations
+                for fact in location_evidence(
+                    item,
+                    source_operation="list_workshop_locations",
+                    observed_at=now,
+                )
+            ),
         )
 
     if name is ReadCommandName.FIND_WORKSHOP_SLOTS:
@@ -96,7 +130,17 @@ async def execute_workshop_read(
             gathered={"dealership_id": selected_dealer_id, "service_type_id": service_id},
         )
         if not slots:
-            return CommandOutcome(next_state, (renderer.notice("There are no matching workshop slots right now.", code="no_workshop_slots"),))
+            return CommandOutcome(
+                next_state,
+                (renderer.notice("There are no matching workshop slots right now.", code="no_workshop_slots"),),
+                result_count_evidence(
+                    "find_workshop_slots",
+                    "workshop_slot_search",
+                    0,
+                    observed_at=now,
+                    freshness=EvidenceFreshness.LIVE,
+                ),
+            )
         records = tuple({
             "id": slot.id, "dealership_id": slot.dealership_id,
             "service_type_id": slot.service_type_id, "starts_at": slot.starts_at.isoformat(),
@@ -115,7 +159,21 @@ async def execute_workshop_read(
             records=tuple((slot.id, record) for slot, record in zip(slots, records, strict=True)),
             block=block, now=now,
         )
-        return CommandOutcome(next_state.with_presentation_group(group), (block,))
+        return CommandOutcome(
+            next_state.with_presentation_group(group),
+            (block,),
+            result_count_evidence(
+                "find_workshop_slots",
+                "workshop_slot_search",
+                len(slots),
+                observed_at=now,
+                freshness=EvidenceFreshness.LIVE,
+            ) + tuple(
+                fact
+                for slot in slots
+                for fact in workshop_slot_evidence(slot, observed_at=now)
+            ),
+        )
 
     if name is ReadCommandName.RETRIEVE_WORKSHOP_BOOKING:
         fields = ("reference", "last_name", "registration", "phone")
@@ -167,6 +225,7 @@ async def execute_workshop_read(
         return CommandOutcome(
             next_state,
             (renderer.records("booking_details", (record,), entity_type="workshop_booking", entity_ids=(details.booking.id,)),),
+            workshop_booking_evidence(details, observed_at=now),
         )
     return None
 

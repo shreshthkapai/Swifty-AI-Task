@@ -115,6 +115,9 @@ class ToolGateTests(unittest.TestCase):
             ["Petrol", "Diesel", "Hybrid", "Electric", None],
         )
         self.assertNotIn("small", properties["body_style"]["enum"])
+        self.assertEqual(properties["exclude_vehicle_ids"]["items"], {"type": "string"})
+        self.assertEqual(properties["exclude_models"]["items"], {"type": "string"})
+        self.assertEqual(properties["exclude_makes"]["items"], {"type": "string"})
 
     def test_no_active_workflow_keeps_all_dealership_entry_options_visible(self) -> None:
         selection = self.gate.select(
@@ -131,6 +134,54 @@ class ToolGateTests(unittest.TestCase):
                 item.reason is InclusionReason.NO_ACTIVE_WORKFLOW
                 for item in selection.included
             )
+        )
+
+    def test_initial_vehicle_signal_hides_unrelated_preparations(self) -> None:
+        selection = self.gate.select(
+            state=ConversationState(),
+            current_input="Show me electric SUVs under fifty thousand pounds",
+            now=NOW,
+        )
+
+        self.assertIn("search_vehicles", selection.included_names)
+        self.assertIn("get_vehicle_details", selection.included_names)
+        self.assertIn("compare_vehicles", selection.included_names)
+        self.assertIn("list_dealerships", selection.included_names)
+        self.assertNotIn("prepare_workshop_booking", selection.included_names)
+        self.assertNotIn("prepare_dealership_message", selection.included_names)
+        self.assertEqual(
+            selection.reason_for("get_vehicle_details"),
+            InclusionReason.EXPLICIT_DOMAIN_SIGNAL,
+        )
+
+    def test_initial_mixed_signals_expose_union_of_relevant_domains(self) -> None:
+        selection = self.gate.select(
+            state=ConversationState(),
+            current_input="Find an electric car and book my MOT service",
+            now=NOW,
+        )
+
+        self.assertIn("compare_vehicles", selection.included_names)
+        self.assertIn("prepare_workshop_booking", selection.included_names)
+        self.assertNotIn("prepare_dealership_message", selection.included_names)
+        self.assertEqual(
+            selection.reason_for("prepare_workshop_booking"),
+            InclusionReason.EXPLICIT_DOMAIN_SIGNAL,
+        )
+
+    def test_vehicle_worth_language_exposes_part_exchange(self) -> None:
+        selection = self.gate.select(
+            state=ConversationState(),
+            current_input=(
+                "What's my 2019 Kia Sportage worth in good condition at Manchester?"
+            ),
+            now=NOW,
+        )
+
+        self.assertIn("prepare_part_exchange", selection.included_names)
+        self.assertEqual(
+            selection.reason_for("prepare_part_exchange"),
+            InclusionReason.EXPLICIT_DOMAIN_SIGNAL,
         )
 
     def test_active_workshop_flow_focuses_tools_and_keeps_safe_entry_reads(self) -> None:
@@ -250,7 +301,7 @@ class ToolGateTests(unittest.TestCase):
         decoded = json.loads(serialized)
 
         self.assertEqual(serialized, selection.to_json())
-        self.assertEqual(decoded["tool_gate_policy_version"], 1)
+        self.assertEqual(decoded["tool_gate_policy_version"], 2)
         self.assertEqual(
             len(decoded["included"]) + len(decoded["excluded"]),
             len(command_catalogue()),

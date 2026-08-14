@@ -12,7 +12,7 @@ DOMAIN_SIGNALS = {
         r"\b(vehicle|car|cars|bmw|mini|volvo|x[1-7]|ix[1-3]?|suv|hatchback|saloon|automatic|manual|petrol|diesel|electric|hybrid|budget|cheaper|boot|mileage|stock)\b"
     ),
     WorkflowDomain.SALES: re.compile(
-        r"\b(sales|enquiry|finance|callback|call me|part exchange|trade in|valuation|interest|buy|price)\b"
+        r"\b(sales|enquiry|finance|callback|call me|part exchange|trade in|valuation|worth|interest|buy|price)\b"
     ),
     WorkflowDomain.TEST_DRIVE: re.compile(r"\b(test drive|drive it|try it|slot)\b"),
     WorkflowDomain.WORKSHOP: re.compile(

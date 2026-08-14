@@ -107,8 +107,8 @@ class TurnPlanContractTests(unittest.TestCase):
         original = contracts.TurnPlan(
             scope=contracts.TurnScope.DEALERSHIP_ADJACENT,
             commands=(),
-            response_strategy=contracts.ResponseStrategy.ADJACENT_ADVICE,
-            adjacent_advice="An SUV can suit five people; compare rear-seat and boot space.",
+            response_strategy=contracts.ResponseStrategy.GENERAL_GUIDANCE,
+            response_mode=contracts.ResponseMode.GROUNDED_ANSWER,
         )
 
         restored = contracts.TurnPlan.from_dict(original.to_dict())
@@ -119,7 +119,7 @@ class TurnPlanContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown TurnPlan fields"):
             contracts.TurnPlan.from_dict(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "scope": "in_domain",
                     "commands": [],
                     "response_strategy": "missing_information",
@@ -174,12 +174,12 @@ class TurnPlanContractTests(unittest.TestCase):
                 response_strategy=contracts.ResponseStrategy.MISSING_INFORMATION,
                 clarification_question=42,
             )
-        with self.assertRaisesRegex(ValueError, "adjacent_advice"):
+        with self.assertRaisesRegex(ValueError, "response_mode"):
             contracts.TurnPlan(
                 scope=contracts.TurnScope.DEALERSHIP_ADJACENT,
                 commands=(),
-                response_strategy=contracts.ResponseStrategy.ADJACENT_ADVICE,
-                adjacent_advice=42,
+                response_strategy=contracts.ResponseStrategy.GENERAL_GUIDANCE,
+                response_mode="grounded_answer",
             )
 
     def test_text_response_strategies_require_their_text_payload(self) -> None:
@@ -189,18 +189,32 @@ class TurnPlanContractTests(unittest.TestCase):
                 commands=(),
                 response_strategy=contracts.ResponseStrategy.MISSING_INFORMATION,
             )
-        with self.assertRaisesRegex(ValueError, "adjacent_advice"):
+        with self.assertRaisesRegex(ValueError, "deterministic mode"):
             contracts.TurnPlan(
-                scope=contracts.TurnScope.DEALERSHIP_ADJACENT,
+                scope=contracts.TurnScope.IN_DOMAIN,
                 commands=(),
-                response_strategy=contracts.ResponseStrategy.ADJACENT_ADVICE,
+                response_strategy=contracts.ResponseStrategy.ACKNOWLEDGEMENT,
+                response_mode=contracts.ResponseMode.CLARIFICATION,
+            )
+
+    def test_action_response_strategy_and_mode_cannot_disagree(self) -> None:
+        with self.assertRaisesRegex(ValueError, "action_prepared mode"):
+            contracts.TurnPlan(
+                scope=contracts.TurnScope.IN_DOMAIN,
+                commands=(
+                    contracts.PreparationCommand(
+                        contracts.PreparationCommandName.PREPARE_CALLBACK
+                    ),
+                ),
+                response_strategy=contracts.ResponseStrategy.ACTION_PREPARED,
+                response_mode=contracts.ResponseMode.GROUNDED_ANSWER,
             )
 
     def test_valid_command_name_does_not_mask_invalid_arguments(self) -> None:
         with self.assertRaisesRegex(ValueError, "non-JSON"):
             contracts.TurnPlan.from_dict(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "scope": "in_domain",
                     "commands": [
                         {
@@ -209,6 +223,7 @@ class TurnPlanContractTests(unittest.TestCase):
                         }
                     ],
                     "response_strategy": "search_results",
+                    "response_mode": "grounded_answer",
                 }
             )
 
@@ -234,12 +249,13 @@ class TurnPlanContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown command"):
             contracts.TurnPlan.from_dict(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "scope": "in_domain",
                     "commands": [
                         {"name": "book_test_drive", "arguments": {"slot_id": "x"}}
                     ],
                     "response_strategy": "action_prepared",
+                    "response_mode": "action_prepared",
                 }
             )
 

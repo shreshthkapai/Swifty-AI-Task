@@ -1,6 +1,9 @@
 import { createInventory } from "./features/inventory/inventory.js";
 import { renderLocations } from "./features/locations/locations.js";
 import { showVehicleDetail } from "./features/vehicle-detail/vehicle-detail.js";
+import { createVehicleContextHost } from "./features/vehicle-detail/vehicle-context.js";
+import { createChatApi } from "./features/webchat/api.js";
+import { createWebchat, pageObservation } from "./features/webchat/webchat.js";
 
 const controls = {
   query: document.querySelector("#query-filter"),
@@ -13,6 +16,12 @@ const controls = {
 
 const dialog = document.querySelector("#vehicle-dialog");
 const detailContainer = document.querySelector("#vehicle-detail");
+const webchatRoot = document.querySelector("#northstar-webchat");
+const vehicleContextHost = createVehicleContextHost({
+  dialog,
+  chatRoot: webchatRoot,
+  home: webchatRoot.parentElement,
+});
 
 function openVehicle(vehicleId, updateUrl = true) {
   if (updateUrl) {
@@ -21,6 +30,7 @@ function openVehicle(vehicleId, updateUrl = true) {
     url.hash = "vehicles";
     window.history.pushState({ vehicleId }, "", url);
   }
+  vehicleContextHost.mount();
   return showVehicleDetail({
     vehicleId,
     dialog,
@@ -75,6 +85,7 @@ dialog.addEventListener("click", (event) => {
   }
 });
 dialog.addEventListener("close", () => {
+  vehicleContextHost.restore();
   const url = new URL(window.location);
   url.searchParams.delete("vehicle");
   window.history.replaceState(null, "", url);
@@ -97,3 +108,10 @@ const linkedVehicleId = new URL(window.location).searchParams.get("vehicle");
 if (linkedVehicleId) {
   openVehicle(linkedVehicleId, false);
 }
+
+const webchat = createWebchat({
+  root: webchatRoot,
+  api: createChatApi(),
+  getPageObservation: () => pageObservation({ location: window.location, controls }),
+});
+webchat.init();

@@ -10,6 +10,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from webchat.domain.common import require_non_empty
 from webchat.harness.contracts import TurnPlan
+from webchat.harness.grounded_response import GroundedClaim, GroundedResponseRequest
 from webchat.harness.tool_gate import SemanticCommandSpec
 
 
@@ -92,6 +93,38 @@ class PlanningResult:
         object.__setattr__(self, "model", require_non_empty(self.model, "model"))
 
 
+@dataclass(frozen=True, slots=True)
+class GroundedResponseResult:
+    claims: tuple[GroundedClaim, ...]
+    usage: ProviderUsage
+    latency_ms: float
+    provider: str
+    model: str
+    focused_entity_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.claims, tuple) or not self.claims or not all(
+            isinstance(item, GroundedClaim) for item in self.claims
+        ):
+            raise ValueError("claims must contain at least one GroundedClaim")
+        if not isinstance(self.usage, ProviderUsage):
+            raise ValueError("usage must be ProviderUsage")
+        if (
+            not isinstance(self.latency_ms, (int, float))
+            or not math.isfinite(self.latency_ms)
+            or self.latency_ms < 0
+        ):
+            raise ValueError("latency_ms must be a non-negative finite number")
+        object.__setattr__(self, "provider", require_non_empty(self.provider, "provider"))
+        object.__setattr__(self, "model", require_non_empty(self.model, "model"))
+        if self.focused_entity_id is not None:
+            object.__setattr__(
+                self,
+                "focused_entity_id",
+                require_non_empty(self.focused_entity_id, "focused_entity_id"),
+            )
+
+
 class ProviderErrorKind(StrEnum):
     TIMEOUT = "timeout"
     TRANSPORT = "transport"
@@ -126,8 +159,47 @@ class PlanningProviderError(Exception):
         super().__init__(kind.value)
 
 
+class GroundedResponseOutputError(Exception):
+    """Safe classification for a structurally invalid grounded answer."""
+
+    def __init__(self) -> None:
+        super().__init__("invalid_grounded_response")
+
+
+class GroundedResponseProviderError(Exception):
+    def __init__(
+        self,
+        kind: ProviderErrorKind,
+        *,
+        retryable: bool,
+        status_code: int | None = None,
+    ) -> None:
+        if not isinstance(kind, ProviderErrorKind):
+            raise TypeError("kind must be a ProviderErrorKind")
+        if not isinstance(retryable, bool):
+            raise TypeError("retryable must be boolean")
+        if status_code is not None and (
+            type(status_code) is not int or not 100 <= status_code <= 599
+        ):
+            raise TypeError("status_code must be an HTTP status code or None")
+        self.kind = kind
+        self.retryable = retryable
+        self.status_code = status_code
+        super().__init__(kind.value)
+
+
 @runtime_checkable
 class PlanningProvider(Protocol):
     async def plan(self, request: PlanningRequest) -> PlanningResult:
         """Return one typed plan without retaining authoritative conversation state."""
+        ...
+
+
+@runtime_checkable
+class GroundedResponseProvider(Protocol):
+    async def respond(
+        self,
+        request: GroundedResponseRequest,
+    ) -> GroundedResponseResult:
+        """Return one answer grounded in the request's explicit evidence."""
         ...

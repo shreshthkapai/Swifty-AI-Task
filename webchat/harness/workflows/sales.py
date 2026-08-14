@@ -17,6 +17,7 @@ from webchat.domain.sales import (
 
 from ..actions import PendingActionType, PendingRequestType
 from ..contracts import PreparationCommandName, ReadCommandName
+from ..evidence import EvidenceFreshness
 from ..policy import PolicyCode, PolicyEngine, PolicyError
 from ..render import DeclarativeRenderer
 from ..state import ConversationState, CustomerState, WorkflowDomain, WorkflowStage
@@ -30,6 +31,11 @@ from .common import (
     prepare_action,
     presentation_group,
     workflow_state,
+)
+from .facts import (
+    business_information_evidence,
+    result_count_evidence,
+    test_drive_slot_evidence,
 )
 from .references import resolve_dealership_for_command
 
@@ -104,6 +110,13 @@ async def execute_sales_read(
         return CommandOutcome(
             next_state,
             (renderer.notice("There are no matching test-drive slots right now.", code="no_test_drive_slots"),),
+            result_count_evidence(
+                "find_test_drive_slots",
+                "test_drive_slot_search",
+                0,
+                observed_at=now,
+                freshness=EvidenceFreshness.LIVE,
+            ),
         )
     records = tuple(
         {
@@ -122,7 +135,20 @@ async def execute_sales_read(
         records=tuple((slot.id, record) for slot, record in zip(slots, records, strict=True)),
         block=block, now=now,
     )
-    return CommandOutcome(next_state.with_presentation_group(group), (block,))
+    return CommandOutcome(
+        next_state.with_presentation_group(group),
+        (block,),
+        result_count_evidence(
+            "find_test_drive_slots",
+            "test_drive_slot_search",
+            len(slots),
+            observed_at=now,
+            freshness=EvidenceFreshness.LIVE,
+        )
+        + tuple(
+            fact for slot in slots for fact in test_drive_slot_evidence(slot, observed_at=now)
+        ),
+    )
 
 
 async def execute_sales_preparation(
@@ -183,7 +209,18 @@ async def execute_sales_preparation(
         )
         if resolution_failure is not None:
             return resolution_failure
+        enquiry_type = enum_value(
+            EnquiryType,
+            arguments.get("enquiry_type"),
+            "enquiry_type",
+            EnquiryType.GENERAL,
+        )
         message = arguments.get("message")
+        if not message and enquiry_type is not EnquiryType.GENERAL:
+            message = (
+                "Customer requested contact about "
+                f"{enquiry_type.value.replace('_', ' ')}."
+            )
         missing = tuple(key for key, value in (("dealership_id", dealership_id), ("message", message)) if not value)
         if missing:
             return missing_information(state, missing, domain=WorkflowDomain.SALES, renderer=renderer)
@@ -196,22 +233,18 @@ async def execute_sales_preparation(
             request_type=PendingRequestType.SALES_ENQUIRY,
             payload={
                 "dealership_id": dealership_id,
-                "enquiry_type": enum_value(EnquiryType, arguments.get("enquiry_type"), "enquiry_type", EnquiryType.GENERAL).value,
+                "enquiry_type": enquiry_type.value,
                 "customer": customer_payload(customer), "message": message,
                 "vehicle_id": vehicle_id,
             },
             now=now, id_factory=id_factory, renderer=renderer, domain=WorkflowDomain.SALES,
         )
-        if enum_value(
-            EnquiryType,
-            arguments.get("enquiry_type"),
-            "enquiry_type",
-            EnquiryType.GENERAL,
-        ) is EnquiryType.FINANCE:
+        if enquiry_type is EnquiryType.FINANCE:
             return await _with_business_information(
                 outcome,
                 dealer=dealer,
                 renderer=renderer,
+                observed_at=now,
             )
         return outcome
 
@@ -333,6 +366,7 @@ async def execute_sales_preparation(
             outcome,
             dealer=dealer,
             renderer=renderer,
+            observed_at=now,
         )
     return None
 
@@ -368,6 +402,7 @@ async def _with_business_information(
     *,
     dealer: DealerAdapter,
     renderer: DeclarativeRenderer,
+    observed_at: datetime,
 ) -> CommandOutcome:
     info = await dealer.get_business_information()
     record = {
@@ -385,4 +420,8 @@ async def _with_business_information(
         entity_type="business_information",
         entity_ids=(info.organisation,),
     )
-    return CommandOutcome(outcome.state, outcome.blocks + (block,))
+    return CommandOutcome(
+        outcome.state,
+        outcome.blocks + (block,),
+        business_information_evidence(info, observed_at=observed_at),
+    )

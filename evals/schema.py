@@ -242,8 +242,10 @@ class TurnExpectation:
         max_model_calls = data["max_model_calls"]
         if not isinstance(max_model_calls, int) or isinstance(max_model_calls, bool):
             raise CorpusValidationError(f"{path}.max_model_calls must be an integer")
-        if max_model_calls not in {0, 1}:
-            raise CorpusValidationError(f"{path}.max_model_calls must be zero or one")
+        if max_model_calls not in {0, 1, 2}:
+            raise CorpusValidationError(
+                f"{path}.max_model_calls must be zero, one, or two"
+            )
         return cls(
             required_commands=required_commands,
             allowed_commands=allowed_commands,
@@ -309,7 +311,7 @@ class CorpusTurn:
             raise CorpusValidationError(f"{path} action turns cannot have a scripted plan")
         if expectation.max_model_calls == 0 and plan is not None:
             raise CorpusValidationError(f"{path} zero-call turns cannot have a scripted plan")
-        if expectation.max_model_calls == 1 and plan is None:
+        if expectation.max_model_calls > 0 and plan is None:
             raise CorpusValidationError(f"{path} planned turns require a scripted plan")
         if plan is not None:
             planned_names = {command.name.value for command in plan.commands}

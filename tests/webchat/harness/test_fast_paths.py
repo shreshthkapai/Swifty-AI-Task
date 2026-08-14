@@ -122,7 +122,12 @@ class DeterministicFastPathTests(unittest.IsolatedAsyncioTestCase):
         state = ConversationState(
             workflow=WorkflowState(
                 WorkflowDomain.VEHICLES, WorkflowStage.REFINING,
-                {"last_vehicle_search": {"make": "BMW", "page": 1, "page_size": 10}},
+                {"last_vehicle_search": {
+                    "make": "BMW",
+                    "exclude_vehicle_ids": ["veh-003"],
+                    "page": 1,
+                    "page_size": 10,
+                }},
             ),
             presentation_groups=(PresentationGroup(
                 "group-1", "vehicle", (PresentedEntity("veh-003", 1),), NOW,
@@ -136,6 +141,8 @@ class DeterministicFastPathTests(unittest.IsolatedAsyncioTestCase):
         search = fake.search_vehicles.await_args.args[0]
         self.assertEqual(search.page, 2)
         self.assertEqual(result.state.presentation_groups[-1].entities[0].entity_id, "veh-004")
+        saved_search = result.state.workflow.gathered_fields_dict()["last_vehicle_search"]
+        self.assertEqual(saved_search["exclude_vehicle_ids"], ["veh-003"])
 
     async def test_unknown_ui_reference_is_rejected_before_dealer_call(self) -> None:
         fake = dealer()

@@ -11,6 +11,12 @@ from evals.run import ObservedTurn
 from evals.schema import CorpusTurn, Scenario
 from webchat.harness.contracts import ResponseStrategy, TurnPlan
 from webchat.harness.planning import PlanValidationError, PlanningEngine, TurnRequest
+from webchat.harness.evidence import EvidenceReference
+from webchat.harness.grounded_response import (
+    GroundedClaim,
+    GroundedClaimKind,
+    GroundedEvidenceBinding,
+)
 from webchat.harness.runtime import HarnessRuntime, TurnResult
 from webchat.harness.state import ActionReference, ConversationState, PageContext
 from webchat.providers.base import (
@@ -21,6 +27,8 @@ from webchat.providers.base import (
     PlanningRequest,
     PlanningResult,
     ProviderUsage,
+    GroundedResponseProvider,
+    GroundedResponseResult,
 )
 
 
@@ -38,6 +46,63 @@ class ScriptedProvider:
         return PlanningResult(
             self.plan_value, ProviderUsage(100, 20, 120), 1.0,
             "scripted", "corpus-plan",
+        )
+
+
+class ScriptedGroundedResponseProvider:
+    """Render a generic evidence-linked answer without encoding expected outcomes."""
+
+    async def respond(self, request) -> GroundedResponseResult:
+        claims = []
+        zero_result = next((
+            item
+            for item in request.evidence.items
+            if item.source_operation == "search_vehicles"
+            and item.field_name == "result_count"
+            and item.value == 0
+        ), None)
+        if zero_result is not None:
+            reference = EvidenceReference(zero_result.evidence_id)
+            claims.append(GroundedClaim(
+                "I couldn't find matching vehicles in the current results. Try relaxing one search constraint.",
+                GroundedClaimKind.SUPPORTED_FACT,
+                (reference,),
+                (GroundedEvidenceBinding(reference, zero_result.value),),
+            ))
+        elif request.evidence.items:
+            item = request.evidence.items[0]
+            reference = EvidenceReference(item.evidence_id)
+            claims.append(GroundedClaim(
+                "I found current information from the dealership. The verified results are below.",
+                GroundedClaimKind.SUPPORTED_FACT,
+                (reference,),
+                (GroundedEvidenceBinding(reference, item.value),),
+            ))
+            if any(
+                item.source_operation in {"search_vehicles", "get_vehicle_details"}
+                for item in request.evidence.items
+            ):
+                claims.append(GroundedClaim(
+                    "For practical fit, compare passenger space, child-seat access, and boot capacity against your everyday needs.",
+                    GroundedClaimKind.GENERAL_GUIDANCE,
+                ))
+        else:
+            claims.append(GroundedClaim(
+                "For vehicle suitability, compare passenger space, child-seat access, boot capacity, running costs, and everyday needs; I can also show current stock.",
+                GroundedClaimKind.GENERAL_GUIDANCE,
+            ))
+        if request.missing_facts:
+            claims.append(GroundedClaim(
+                "Some requested details are not confirmed in the dealership data.",
+                GroundedClaimKind.LIMITATION_UNKNOWN,
+                request.missing_facts,
+            ))
+        return GroundedResponseResult(
+            tuple(claims),
+            ProviderUsage(100, 20, 120),
+            1.0,
+            "scripted",
+            "corpus-grounded-response",
         )
 
 
@@ -69,11 +134,15 @@ class ProviderConversationDriver:
         self,
         registry: FixtureRegistry,
         provider_factory: Callable[[], PlanningProvider],
+        grounded_response_factory: Callable[
+            [], GroundedResponseProvider
+        ] = ScriptedGroundedResponseProvider,
         *,
         scripted: bool = False,
     ) -> None:
         self._registry = registry
         self._provider_factory = provider_factory
+        self._grounded_response_factory = grounded_response_factory
         self._scripted = scripted
         self._sessions: dict[str, _ScenarioSession] = {}
 
@@ -84,6 +153,7 @@ class ProviderConversationDriver:
         runtime = HarnessRuntime(
             dealer=dealer,
             planning=PlanningEngine(provider),
+            grounded_response=self._grounded_response_factory(),
             id_factory=lambda: f"eval-{next(counter)}",
         )
         raw_page = scenario.initial_page
@@ -139,6 +209,10 @@ class ProviderConversationDriver:
         except PlanningProviderError as exc:
             failure = getattr(exc, "kind", type(exc).__name__)
             return ObservedTurn(provider_failure=str(failure))
+        if result.planner_failure is not None:
+            return ObservedTurn(planner_failure=result.planner_failure)
+        if result.provider_failure is not None:
+            return ObservedTurn(provider_failure=result.provider_failure)
         session.state = result.state
         actual_plan = (
             session.provider.last_result.plan
@@ -191,7 +265,12 @@ class ProviderConversationDriver:
 
 class ScriptedConversationDriver(ProviderConversationDriver):
     def __init__(self, registry: FixtureRegistry) -> None:
-        super().__init__(registry, ScriptedProvider, scripted=True)
+        super().__init__(
+            registry,
+            ScriptedProvider,
+            ScriptedGroundedResponseProvider,
+            scripted=True,
+        )
 
 
 def _observed_strategy(

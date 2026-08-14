@@ -23,6 +23,9 @@ CONVERSATION_STATE_SCHEMA_VERSION = 1
 STRUCTURED_MESSAGE_SCHEMA_VERSION = 1
 MAX_PRESENTATION_GROUPS = 5
 DEFAULT_VERIFICATION_TTL = timedelta(minutes=15)
+PAGE_SEARCH_FILTER_FIELDS = frozenset(
+    {"query", "make", "body_style", "fuel_type", "max_price_minor", "sort"}
+)
 
 
 def _optional_text(value: str | None, field_name: str) -> str | None:
@@ -99,6 +102,7 @@ class CustomerState:
 class PageContext:
     current_url: str | None = None
     page_vehicle_id: str | None = None
+    search_filters: FrozenObject | Mapping[str, Any] = field(default_factory=dict)
     observed_at: datetime | None = None
     is_authoritative: bool = False
 
@@ -112,6 +116,30 @@ class PageContext:
                 field_name,
                 _optional_text(getattr(self, field_name), field_name),
             )
+        if isinstance(self.search_filters, Mapping):
+            object.__setattr__(
+                self,
+                "search_filters",
+                freeze_json_object(self.search_filters, field="search_filters"),
+            )
+        elif not isinstance(self.search_filters, FrozenObject):
+            raise ValueError("search_filters must be a JSON object")
+        validate_frozen_json_object(self.search_filters, field="search_filters")
+        filters = self.search_filters_dict()
+        if set(filters) - PAGE_SEARCH_FILTER_FIELDS:
+            raise ValueError("search_filters contains an unknown field")
+        for name, value in filters.items():
+            if name == "max_price_minor":
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, int)
+                    or not 0 <= value <= 1_000_000_000
+                ):
+                    raise ValueError(
+                        "search_filters max_price_minor must be a non-negative integer"
+                    )
+            elif not isinstance(value, str) or not value.strip() or len(value) > 100:
+                raise ValueError(f"search_filters {name} must be a non-empty string")
         if self.observed_at is not None:
             require_aware(self.observed_at, "observed_at")
         if self.is_authoritative is not False:
@@ -128,8 +156,13 @@ class PageContext:
         }
         if self.observed_at is not None:
             result["observed_at"] = _datetime_to_text(self.observed_at, "observed_at")
+        if filters := self.search_filters_dict():
+            result["search_filters"] = filters
         result["is_authoritative"] = False
         return result
+
+    def search_filters_dict(self) -> dict[str, Any]:
+        return thaw_json_object(self.search_filters)
 
     @classmethod
     def from_dict(cls, value: object) -> PageContext:
@@ -137,6 +170,7 @@ class PageContext:
         allowed = {
             "current_url",
             "page_vehicle_id",
+            "search_filters",
             "observed_at",
             "is_authoritative",
         }
@@ -145,6 +179,7 @@ class PageContext:
         return cls(
             current_url=data.get("current_url"),
             page_vehicle_id=data.get("page_vehicle_id"),
+            search_filters=data.get("search_filters", {}),
             observed_at=(
                 None
                 if observed is None

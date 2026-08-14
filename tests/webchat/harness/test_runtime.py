@@ -46,6 +46,12 @@ from webchat.harness.contracts import (
     TurnScope,
 )
 from webchat.harness.planning import PlanningEngine, TurnRequest
+from webchat.harness.evidence import EvidenceReference
+from webchat.harness.grounded_response import (
+    GroundedClaim,
+    GroundedClaimKind,
+    GroundedEvidenceBinding,
+)
 from webchat.harness.runtime import HarnessRuntime
 from webchat.harness.state import (
     ActionReference,
@@ -53,11 +59,12 @@ from webchat.harness.state import (
     CustomerState,
     EntityContext,
     PageContext,
+    VehiclePreferences,
     WorkflowDomain,
     WorkflowStage,
     WorkflowState,
 )
-from webchat.providers.base import PlanningResult, ProviderUsage
+from webchat.providers.base import GroundedResponseResult, PlanningResult, ProviderUsage
 
 
 NOW = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
@@ -147,6 +154,47 @@ class FakeProvider:
         )
 
 
+class FakeGroundedProvider:
+    def __init__(self, claims_factory=None) -> None:
+        self.claims_factory = claims_factory
+        self.requests = []
+
+    async def respond(self, request):
+        self.requests.append(request)
+        if self.claims_factory is not None:
+            claims = self.claims_factory(request)
+        elif request.evidence.items:
+            item = request.evidence.items[0]
+            reference = EvidenceReference(item.evidence_id)
+            claims = (
+                GroundedClaim(
+                    "I found the current dealership information.",
+                    GroundedClaimKind.SUPPORTED_FACT,
+                    (reference,),
+                    (GroundedEvidenceBinding(reference, item.value),),
+                ),
+                GroundedClaim(
+                    "Some requested details are not confirmed in the dealer data.",
+                    GroundedClaimKind.LIMITATION_UNKNOWN,
+                    request.missing_facts,
+                ),
+            )
+        else:
+            claims = (
+                GroundedClaim(
+                    "I can help you work through that dealership question.",
+                    GroundedClaimKind.GENERAL_GUIDANCE,
+                ),
+            )
+        return GroundedResponseResult(
+            claims,
+            ProviderUsage(10, 5, 15),
+            2.0,
+            "fake",
+            "grounded-fixture",
+        )
+
+
 def dealer() -> Mock:
     fake = Mock(spec=DealerAdapter)
     fake.list_dealerships.return_value = (location(),)
@@ -162,13 +210,20 @@ def dealer() -> Mock:
     return fake
 
 
-def runtime(dealer_fake: Mock, plan: TurnPlan) -> tuple[HarnessRuntime, FakeProvider]:
+def runtime(
+    dealer_fake: Mock,
+    plan: TurnPlan,
+    *,
+    grounded_response=None,
+) -> tuple[HarnessRuntime, FakeProvider]:
     provider = FakeProvider(plan)
+    responder = grounded_response or FakeGroundedProvider()
     identifiers = (f"id-{index}" for index in range(1, 100))
     return (
         HarnessRuntime(
             dealer=dealer_fake,
             planning=PlanningEngine(provider),
+            grounded_response=responder,
             id_factory=lambda: next(identifiers),
         ),
         provider,
@@ -255,12 +310,16 @@ class HarnessRuntimeTests(unittest.IsolatedAsyncioTestCase):
         ))
 
         self.assertEqual(len(provider.requests), 1)
-        self.assertEqual(result.model_calls, 1)
+        self.assertEqual(result.model_calls, 2)
         self.assertEqual(result.state.preferences.makes, ("BMW",))
         self.assertEqual(result.state.preferences.maximum_price_minor, 3_000_000)
         cards = next(block for block in result.blocks if block.kind == "vehicle_cards")
         self.assertEqual(cards.to_dict()["payload"]["vehicles"][0]["price"]["display"], "Price on request")
         self.assertEqual(result.state.presentation_groups[-1].entities[0].entity_id, "veh-019")
+        self.assertIn(
+            ("veh-019", "price"),
+            {(item.entity_id, item.field_name) for item in result.evidence},
+        )
 
     async def test_cheaper_refinement_uses_presented_dealer_price_as_exclusive_ceiling(self) -> None:
         fake = dealer()
@@ -291,6 +350,67 @@ class HarnessRuntimeTests(unittest.IsolatedAsyncioTestCase):
         search = fake.search_vehicles.await_args_list[1].args[0]
         self.assertEqual(search.max_price, Money(3_999_999, "GBP"))
         self.assertEqual(refined.state.preferences.maximum_price_minor, 3_999_999)
+
+    async def test_empty_vehicle_search_gives_one_responder_authoritative_evidence(self) -> None:
+        fake = dealer()
+        fake.search_vehicles.return_value = Page((), 1, 10, 0, 0)
+        plan = TurnPlan(
+            TurnScope.IN_DOMAIN,
+            (ReadCommand.from_mapping(ReadCommandName.SEARCH_VEHICLES, {
+                "fuel_type": "Electric",
+                "body_style": "SUV",
+                "max_price_minor": 4_000_000,
+                "currency": "GBP",
+            }),),
+            ResponseStrategy.SEARCH_RESULTS,
+        )
+        harness, _ = runtime(fake, plan)
+
+        result = await harness.handle(TurnRequest(
+            current_input="Show me electric SUVs under £40k",
+            state=ConversationState(),
+            now=NOW,
+        ))
+
+        self.assertEqual([block.kind for block in result.blocks], ["text"])
+        evidence = {
+            item.field_name: getattr(item, "value", None)
+            for item in result.evidence
+        }
+        self.assertEqual(evidence["result_count"], 0)
+        self.assertEqual(evidence["fuel_type"], "Electric")
+        self.assertEqual(evidence["body_style"], "SUV")
+        self.assertEqual(evidence["max_price.amount_minor"], 4_000_000)
+
+    async def test_vehicle_search_can_explicitly_clear_a_persisted_budget(self) -> None:
+        fake = dealer()
+        fake.search_vehicles.return_value = Page((vehicle(),), 1, 10, 1, 1)
+        plan = TurnPlan(
+            TurnScope.IN_DOMAIN,
+            (ReadCommand.from_mapping(ReadCommandName.SEARCH_VEHICLES, {
+                "clear_filters": ["max_price_minor"],
+            }),),
+            ResponseStrategy.SEARCH_RESULTS,
+        )
+        harness, _ = runtime(fake, plan)
+        state = ConversationState(preferences=VehiclePreferences(
+            maximum_price_minor=4_000_000,
+            currency="GBP",
+            fuel="Electric",
+            body_type="SUV",
+        ))
+
+        result = await harness.handle(TurnRequest(
+            current_input="Yes, relax the budget",
+            state=state,
+            now=NOW,
+        ))
+
+        search = fake.search_vehicles.await_args.args[0]
+        self.assertIsNone(search.max_price)
+        self.assertEqual(search.fuel_type, "Electric")
+        self.assertEqual(search.body_style, "SUV")
+        self.assertIsNone(result.state.preferences.maximum_price_minor)
 
     async def test_dealer_incompatible_cross_field_arguments_fail_before_adapter_call(self) -> None:
         fake = dealer()
@@ -456,7 +576,15 @@ class HarnessRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result.state.has_active_grant("wsb-1", now=NOW))
         self.assertFalse(result.state.has_active_grant("wsb-1", now=NOW + timedelta(hours=1)))
-        self.assertIn("booking_details", {block.kind for block in result.blocks})
+        self.assertEqual(result.blocks[0].kind, "text")
+        self.assertEqual(result.blocks[1].kind, "booking_details")
+        self.assertIn(
+            ("wsb-1", "status", "confirmed"),
+            {
+                (item.entity_id, item.field_name, getattr(item, "value", None))
+                for item in result.evidence
+            },
+        )
 
     async def test_workshop_amendment_without_grant_is_blocked_before_dealer_call(self) -> None:
         fake = dealer()
@@ -551,17 +679,22 @@ class HarnessRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(provider.requests), 1)
         self.assertEqual(result.executed_commands, ("search_vehicles", "get_dealership_hours"))
-        self.assertEqual({block.kind for block in result.blocks}, {"vehicle_cards", "opening_hours"})
+        self.assertEqual(
+            {block.kind for block in result.blocks},
+            {"text", "vehicle_cards", "opening_hours"},
+        )
+        self.assertEqual(
+            {item.source_operation for item in result.evidence},
+            {"search_vehicles", "get_dealership_hours"},
+        )
 
-    async def test_safe_mixed_advice_is_rendered_before_fresh_dealer_results(self) -> None:
+    async def test_mixed_read_plan_returns_evidence_without_planner_written_prose(self) -> None:
         fake = dealer()
         fake.search_vehicles.return_value = Page((vehicle(),), 1, 10, 1, 1)
-        advice = "Compare rear-seat space, boot capacity, safety equipment and running costs."
         plan = TurnPlan(
             TurnScope.MIXED,
             (ReadCommand.from_mapping(ReadCommandName.SEARCH_VEHICLES, {"body_style": "SUV"}),),
             ResponseStrategy.SEARCH_RESULTS,
-            adjacent_advice=advice,
         )
         harness, _ = runtime(fake, plan)
 
@@ -571,8 +704,17 @@ class HarnessRuntimeTests(unittest.IsolatedAsyncioTestCase):
             now=NOW,
         ))
 
-        self.assertEqual([block.kind for block in result.blocks], ["text", "vehicle_cards"])
-        self.assertEqual(result.blocks[0].to_dict()["payload"]["text"], advice)
+        self.assertEqual(
+            [block.kind for block in result.blocks],
+            ["text", "vehicle_cards"],
+        )
+        self.assertIn(
+            ("vehicle_search", "body_style", "SUV"),
+            {
+                (item.entity_id, item.field_name, getattr(item, "value", None))
+                for item in result.evidence
+            },
+        )
 
     async def test_live_page_vehicle_is_used_and_verified_by_dealer_read(self) -> None:
         fake = dealer()
@@ -632,7 +774,9 @@ class HarnessRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(calls, [("availability", "veh-003"), ("slots", "veh-003")])
-        self.assertIn("slot_choices", {block.kind for block in result.blocks})
+        self.assertEqual(result.blocks[0].kind, "text")
+        self.assertEqual(result.blocks[1].kind, "slot_choices")
+        self.assertTrue(result.evidence)
 
     async def test_slot_intent_blocks_reserved_vehicle_before_slot_lookup(self) -> None:
         fake = dealer()

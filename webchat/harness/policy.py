@@ -64,12 +64,6 @@ class PolicyError(Exception):
 
 
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
-_DEALER_FACT_CLAIM = re.compile(
-    r"(?:\bnorthstar\b|[£$€]\s*\d|\b(?:in stock|we have|available at|open (?:from|until)|closes? at)\b)",
-    re.IGNORECASE,
-)
-
-
 class PolicyEngine:
     """Apply hard rules independently of provider wording or tool visibility."""
 
@@ -106,9 +100,6 @@ class PolicyEngine:
             email=email,
             phone=phone,
         )
-
-    def is_safe_adjacent_advice(self, text: str) -> bool:
-        return isinstance(text, str) and bool(text.strip()) and not _DEALER_FACT_CLAIM.search(text)
 
     def authorize_execution(self, action: PendingAction, *, now: datetime) -> None:
         require_aware(now, "now")

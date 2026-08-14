@@ -65,6 +65,11 @@ class ChatApplicationTests(unittest.IsolatedAsyncioTestCase):
                 "page_observation": {
                     "current_url": "/?vehicle=veh-003#vehicles",
                     "page_vehicle_id": "veh-003",
+                    "search_filters": {
+                        "make": "BMW",
+                        "body_style": "SUV",
+                        "max_price_minor": 3_500_000,
+                    },
                 },
             },
         )
@@ -84,6 +89,10 @@ class ChatApplicationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.current_input, "Can I test drive this?")
         self.assertEqual(request.page_observation.current_url, "/#vehicles")
         self.assertEqual(request.page_observation.page_vehicle_id, "veh-003")
+        self.assertEqual(
+            request.page_observation.search_filters_dict(),
+            {"body_style": "SUV", "make": "BMW", "max_price_minor": 3_500_000},
+        )
         self.assertEqual(request.page_observation.observed_at, NOW)
         self.assertFalse(request.page_observation.is_authoritative)
 
@@ -133,6 +142,8 @@ class ChatApplicationTests(unittest.IsolatedAsyncioTestCase):
             {"client_turn_id": "turn-2", "text": "x" * 201},
             {"client_turn_id": "turn-3", "action": {"action_id": "a", "action_type": "launch_missile"}},
             {"client_turn_id": "turn-4", "text": "hello", "page_observation": {"current_url": "https://evil.example/"}},
+            {"client_turn_id": "turn-5", "text": "hello", "page_observation": {"search_filters": {"email": "alex@example.com"}}},
+            {"client_turn_id": "turn-6", "text": "hello", "page_observation": {"search_filters": {"max_price_minor": "cheap"}}},
             {"client_turn_id": "contains spaces", "text": "hello"},
         )
         for payload in invalid_payloads:

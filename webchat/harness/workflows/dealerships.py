@@ -13,6 +13,7 @@ from webchat.domain.dealerships import ContactMethod
 
 from ..actions import PendingActionType, PendingRequestType
 from ..contracts import PreparationCommandName, ReadCommandName
+from ..evidence import EvidenceFreshness
 from ..policy import PolicyCode, PolicyEngine, PolicyError
 from ..render import DeclarativeRenderer
 from ..state import ConversationState, CustomerState, WorkflowDomain, WorkflowStage
@@ -23,6 +24,12 @@ from .common import (
     missing_information,
     prepare_action,
     workflow_state,
+)
+from .facts import (
+    business_information_evidence,
+    location_evidence,
+    opening_hours_evidence,
+    result_count_evidence,
 )
 from .references import resolve_dealership_for_command
 
@@ -38,12 +45,27 @@ async def execute_dealership_read(
     id_factory: Callable[[], str],
     policy: PolicyEngine,
 ) -> CommandOutcome | None:
-    del now, id_factory, policy
+    del id_factory, policy
     if name is ReadCommandName.LIST_DEALERSHIPS:
         locations = await dealer.list_dealerships()
         return CommandOutcome(
             workflow_state(state, domain=WorkflowDomain.DEALERSHIP, stage=WorkflowStage.DISCOVERY),
             (_locations_block(locations, renderer),),
+            result_count_evidence(
+                "list_dealerships",
+                "dealership_catalogue",
+                len(locations),
+                observed_at=now,
+                freshness=EvidenceFreshness.STABLE,
+            ) + tuple(
+                fact
+                for item in locations
+                for fact in location_evidence(
+                    item,
+                    source_operation="list_dealerships",
+                    observed_at=now,
+                )
+            ),
         )
 
     if name is ReadCommandName.GET_DEALERSHIP_DETAILS:
@@ -62,7 +84,15 @@ async def execute_dealership_read(
             workflow_state(state, domain=WorkflowDomain.DEALERSHIP, stage=WorkflowStage.COMPLETED),
             entities=replace(state.entities, selected_dealer_id=item.id),
         )
-        return CommandOutcome(next_state, (_locations_block((item,), renderer),))
+        return CommandOutcome(
+            next_state,
+            (_locations_block((item,), renderer),),
+            location_evidence(
+                item,
+                source_operation="get_dealership_details",
+                observed_at=now,
+            ),
+        )
 
     if name is ReadCommandName.GET_DEALERSHIP_HOURS:
         dealership_id, failure = await resolve_dealership_for_command(
@@ -100,6 +130,7 @@ async def execute_dealership_read(
         return CommandOutcome(
             replace(state, entities=replace(state.entities, selected_dealer_id=dealership_id)),
             (block,),
+            opening_hours_evidence(hours, observed_at=now),
         )
 
     if name is ReadCommandName.GET_BUSINESS_INFORMATION:
@@ -114,6 +145,7 @@ async def execute_dealership_read(
         return CommandOutcome(
             state,
             (renderer.records("business_information", records, entity_type="business_information", entity_ids=(info.organisation,)),),
+            business_information_evidence(info, observed_at=now),
         )
     return None
 

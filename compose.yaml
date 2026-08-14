@@ -41,6 +41,7 @@ services:
       CHAT_ENVIRONMENT: local
       CHAT_PROVIDER: ${CHAT_PROVIDER:-openai}
       CHAT_MODEL: ${CHAT_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}
+      CHAT_PLANNER_MODEL: ${CHAT_PLANNER_MODEL:-${CHAT_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       NORTHSTAR_BASE_URL: http://dealership-platform:4010

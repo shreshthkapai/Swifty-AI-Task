@@ -17,6 +17,7 @@ from ..actions import (
     PendingActionType,
     PendingRequestType,
 )
+from ..evidence import EvidenceGap, EvidenceItem, EvidenceRecord
 from ..policy import PolicyCode, PolicyError
 from ..render import DeclarativeRenderer
 from ..state import (
@@ -38,6 +39,13 @@ ACTION_TTL = timedelta(minutes=15)
 class CommandOutcome:
     state: ConversationState
     blocks: tuple[MessageBlock, ...]
+    evidence: tuple[EvidenceRecord, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.evidence, tuple) or not all(
+            isinstance(item, (EvidenceItem, EvidenceGap)) for item in self.evidence
+        ):
+            raise ValueError("evidence must contain EvidenceItem or EvidenceGap values")
 
 
 def optional(arguments: Mapping[str, Any], key: str, fallback: Any = None) -> Any:

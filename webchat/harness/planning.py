@@ -19,6 +19,7 @@ from .contracts import (
     PreparationCommand,
     PreparationCommandName,
     ReadCommandName,
+    ResponseMode,
     ResponseStrategy,
     TurnPlan,
     TurnScope,
@@ -28,7 +29,6 @@ from .state import ActionReference, ConversationState, PageContext, StructuredMe
 from .tool_gate import ToolGate, ToolSelection, command_spec
 
 
-MAX_ADJACENT_ADVICE_CHARS = 600
 MAX_CLARIFICATION_CHARS = 300
 
 
@@ -136,6 +136,19 @@ def _canonicalize_command_metadata(value: object) -> object:
     commands = value.get("commands")
     if not isinstance(commands, list) or not commands:
         return value
+    if _has_conflicting_vehicle_price_bounds(commands):
+        normalized = dict(value)
+        normalized.update(
+            scope=TurnScope.IN_DOMAIN.value,
+            commands=[],
+            response_strategy=ResponseStrategy.MISSING_INFORMATION.value,
+            response_mode=ResponseMode.CLARIFICATION.value,
+            clarification_question=(
+                "Your minimum price is above your maximum price. "
+                "Which price limit should I keep?"
+            ),
+        )
+        return normalized
     names = [
         item.get("name") if isinstance(item, Mapping) else None
         for item in commands
@@ -149,9 +162,30 @@ def _canonicalize_command_metadata(value: object) -> object:
         if strategy is None:
             return value
     normalized = dict(value)
+    if normalized.get("scope") == TurnScope.DEALERSHIP_ADJACENT.value:
+        normalized["scope"] = TurnScope.MIXED.value
     normalized["response_strategy"] = strategy.value
+    normalized["response_mode"] = (
+        ResponseMode.ACTION_PREPARED.value
+        if strategy is ResponseStrategy.ACTION_PREPARED
+        else ResponseMode.GROUNDED_ANSWER.value
+    )
     normalized["clarification_question"] = None
     return normalized
+
+
+def _has_conflicting_vehicle_price_bounds(commands: list[object]) -> bool:
+    for command in commands:
+        if not isinstance(command, Mapping) or command.get("name") != "search_vehicles":
+            continue
+        arguments = command.get("arguments")
+        if not isinstance(arguments, Mapping):
+            continue
+        minimum = arguments.get("min_price_minor")
+        maximum = arguments.get("max_price_minor")
+        if type(minimum) is int and type(maximum) is int and minimum > maximum:
+            return True
+    return False
 
 
 def validate_turn_plan(
@@ -176,6 +210,8 @@ def validate_turn_plan(
     if preparation_count:
         if plan.response_strategy is not ResponseStrategy.ACTION_PREPARED:
             raise PlanValidationError("preparation command requires action_prepared response strategy")
+        if plan.response_mode is not ResponseMode.ACTION_PREPARED:
+            raise PlanValidationError("preparation command requires action_prepared response mode")
     elif plan.response_strategy is ResponseStrategy.ACTION_PREPARED:
         raise PlanValidationError("action_prepared response strategy requires a preparation command")
 
@@ -185,19 +221,21 @@ def validate_turn_plan(
             raise PlanValidationError(
                 f"response strategy {plan.response_strategy.value} does not match primary command"
             )
+        if plan.response_mode is not ResponseMode.GROUNDED_ANSWER:
+            raise PlanValidationError("read commands require grounded_answer response mode")
     if plan.scope is TurnScope.DEALERSHIP_ADJACENT and plan.commands:
         raise PlanValidationError("dealership-adjacent advice cannot use dealer commands")
     if plan.scope is TurnScope.DEALERSHIP_ADJACENT and (
-        plan.response_strategy is not ResponseStrategy.ADJACENT_ADVICE
+        plan.response_strategy is not ResponseStrategy.GENERAL_GUIDANCE
     ):
-        raise PlanValidationError("dealership-adjacent scope requires adjacent_advice strategy")
+        raise PlanValidationError("dealership-adjacent scope requires general_guidance strategy")
+    if (
+        plan.scope is TurnScope.DEALERSHIP_ADJACENT
+        and plan.response_mode is not ResponseMode.GROUNDED_ANSWER
+    ):
+        raise PlanValidationError("dealership-adjacent scope requires grounded_answer mode")
     if plan.scope is TurnScope.MIXED and not plan.commands:
         raise PlanValidationError("mixed scope requires a dealership command")
-    if (
-        plan.adjacent_advice is not None
-        and len(plan.adjacent_advice) > MAX_ADJACENT_ADVICE_CHARS
-    ):
-        raise PlanValidationError("adjacent_advice exceeds the bounded length")
     if (
         plan.clarification_question is not None
         and len(plan.clarification_question) > MAX_CLARIFICATION_CHARS
@@ -230,9 +268,15 @@ def _validate_arguments(name: str, arguments: Mapping[str, Any]) -> None:
         if isinstance(value, int) and "minimum" in field_schema and value < field_schema["minimum"]:
             raise PlanValidationError(f"argument {name}.{field} is below its minimum")
         if isinstance(value, list):
-            item_type = field_schema.get("items", {}).get("type")
+            item_schema = field_schema.get("items", {})
+            item_type = item_schema.get("type")
             if item_type and not all(_matches_json_type(item, [item_type]) for item in value):
                 raise PlanValidationError(f"argument {name}.{field} contains the wrong item type")
+            item_enum = item_schema.get("enum")
+            if item_enum and any(item not in item_enum for item in value):
+                raise PlanValidationError(f"argument {name}.{field} contains an unsupported value")
+            if len(value) > field_schema.get("maxItems", len(value)):
+                raise PlanValidationError(f"argument {name}.{field} has too many items")
 
 
 def _matches_json_type(value: Any, expected: list[str]) -> bool:

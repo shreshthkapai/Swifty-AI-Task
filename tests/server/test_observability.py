@@ -1,9 +1,11 @@
 import json
 import unittest
+from datetime import UTC, datetime
 
 from server.observability import (
     JsonEventLogger,
     ObservedDealerAdapter,
+    ObservedGroundedResponseProvider,
     ObservedPlanningProvider,
     conversation_hash,
     log_context,
@@ -15,7 +17,20 @@ from webchat.harness.contracts import (
     TurnScope,
 )
 from webchat.harness.tool_gate import command_spec
-from webchat.providers.base import PlanningRequest, PlanningResult, ProviderUsage
+from webchat.harness.evidence import EvidenceEnvelope
+from webchat.harness.grounded_response import (
+    GroundedClaim,
+    GroundedClaimKind,
+    GroundedResponseRequest,
+    GroundedResponseState,
+)
+from webchat.harness.state import ConversationState
+from webchat.providers.base import (
+    GroundedResponseResult,
+    PlanningRequest,
+    PlanningResult,
+    ProviderUsage,
+)
 
 
 class JsonEventLoggerTests(unittest.TestCase):
@@ -111,8 +126,7 @@ class ExternalCallLoggingTests(unittest.IsolatedAsyncioTestCase):
             plan=TurnPlan(
                 TurnScope.DEALERSHIP_ADJACENT,
                 (),
-                ResponseStrategy.ADJACENT_ADVICE,
-                adjacent_advice="General advice.",
+                ResponseStrategy.GENERAL_GUIDANCE,
             ),
             usage=ProviderUsage(30, 8, 38),
             latency_ms=4,
@@ -157,3 +171,37 @@ class ExternalCallLoggingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event["error_kind"], "unexpected_error")
         self.assertNotIn("provider-secret", lines[0])
         self.assertNotIn("customer@example.com", lines[0])
+
+    async def test_grounded_response_logs_usage_without_question_or_evidence(self) -> None:
+        lines: list[str] = []
+        logger = JsonEventLogger(sink=lines.append)
+        result = GroundedResponseResult(
+            claims=(GroundedClaim(
+                "Compare the space you need.",
+                GroundedClaimKind.GENERAL_GUIDANCE,
+            ),),
+            usage=ProviderUsage(25, 6, 31),
+            latency_ms=3,
+            provider="fixture-provider",
+            model="fixture-model",
+        )
+
+        class Provider:
+            async def respond(self, request):
+                return result
+
+        now = datetime(2026, 8, 14, 12, tzinfo=UTC)
+        request = GroundedResponseRequest(
+            question="PRIVATE QUESTION",
+            state=GroundedResponseState.from_conversation(ConversationState()),
+            evidence=EvidenceEnvelope((), now),
+        )
+        observed = ObservedGroundedResponseProvider(Provider(), logger=logger)
+
+        returned = await observed.respond(request)
+
+        self.assertIs(returned, result)
+        event = json.loads(lines[0])
+        self.assertEqual(event["operation"], "grounded_response")
+        self.assertEqual(event["input_tokens"], 25)
+        self.assertNotIn("PRIVATE QUESTION", lines[0])

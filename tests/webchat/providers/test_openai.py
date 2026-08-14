@@ -49,7 +49,7 @@ def planning_request(*, workshop_only: bool = False) -> PlanningRequest:
 
 def response_payload(plan: dict | None = None) -> dict:
     plan = plan or {
-        "schema_version": 1,
+        "schema_version": 2,
         "scope": "in_domain",
         "commands": [
             {
@@ -76,8 +76,8 @@ def response_payload(plan: dict | None = None) -> dict:
             }
         ],
         "response_strategy": "search_results",
+        "response_mode": "grounded_answer",
         "clarification_question": None,
-        "adjacent_advice": None,
     }
     return {
         "id": "resp-secret-provider-id",
@@ -99,12 +99,27 @@ def response_payload(plan: dict | None = None) -> dict:
 class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
     def test_planner_guidance_uses_known_state_and_bounded_adjacent_next_steps(self) -> None:
         from webchat.providers.openai import _PLANNER_INSTRUCTIONS
+        from webchat.harness.tool_gate import command_spec
 
         self.assertIn("already marked known", _PLANNER_INSTRUCTIONS)
-        self.assertIn("harness adds the dealership next step", _PLANNER_INSTRUCTIONS)
-        self.assertIn("Do not mention stock", _PLANNER_INSTRUCTIONS)
+        self.assertIn("do not write the final customer answer", _PLANNER_INSTRUCTIONS)
+        self.assertIn("response stage owns the wording", _PLANNER_INSTRUCTIONS)
         self.assertIn("lower_max_price", _PLANNER_INSTRUCTIONS)
         self.assertIn("holiday exceptions", _PLANNER_INSTRUCTIONS)
+        self.assertIn("newly supplied", _PLANNER_INSTRUCTIONS)
+        self.assertIn("semantic command can represent", _PLANNER_INSTRUCTIONS)
+        self.assertIn(
+            "newly supplied or corrected",
+            command_spec("retrieve_workshop_booking").description,
+        )
+        self.assertIn(
+            "even when verification or change details are missing",
+            command_spec("prepare_workshop_amendment").description,
+        )
+        self.assertIn(
+            "customer's stated reason",
+            command_spec("prepare_sales_enquiry").description,
+        )
 
     async def test_posts_stateless_strict_structured_request_and_parses_metrics(self) -> None:
         captured = []
@@ -153,7 +168,7 @@ class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
         async def handler(request: httpx.Request) -> httpx.Response:
             bodies.append(json.loads(request.content))
             plan = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "scope": "in_domain",
                 "commands": [
                     {
@@ -167,8 +182,8 @@ class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
                     }
                 ],
                 "response_strategy": "slot_results",
+                "response_mode": "grounded_answer",
                 "clarification_question": None,
-                "adjacent_advice": None,
             }
             return httpx.Response(200, json=response_payload(plan))
 
@@ -232,12 +247,12 @@ class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_well_formed_invalid_plan_is_a_safe_planner_failure(self) -> None:
         payload = response_payload(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "scope": "in_domain",
                 "commands": [],
                 "response_strategy": "search_results",
+                "response_mode": "grounded_answer",
                 "clarification_question": None,
-                "adjacent_advice": None,
             }
         )
 
@@ -284,11 +299,17 @@ class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
         config = OpenAIProviderConfig(api_key="super-secret", model="gpt-test")
 
         self.assertNotIn("super-secret", repr(config))
+        self.assertEqual(config.timeout_seconds, 30.0)
         for kwargs in (
             {"api_key": "", "model": "gpt-test"},
             {"api_key": "key", "model": ""},
             {"api_key": "key", "model": "gpt-test", "timeout_seconds": 0},
             {"api_key": "key", "model": "gpt-test", "max_output_tokens": True},
+            {
+                "api_key": "key",
+                "model": "gpt-test",
+                "grounded_max_output_tokens": 0,
+            },
         ):
             with self.subTest(kwargs=kwargs):
                 with self.assertRaises(ValueError):

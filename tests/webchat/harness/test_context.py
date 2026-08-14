@@ -242,7 +242,14 @@ class ContextCompilerTests(unittest.TestCase):
         )
 
     def test_page_context_is_labelled_as_refreshable_observation(self) -> None:
-        compiled = self.compile()
+        compiled = self.compile(
+            page_observation=PageContext(
+                current_url="/#vehicles",
+                page_vehicle_id="veh-1",
+                search_filters={"make": "BMW", "body_style": "SUV"},
+                observed_at=NOW,
+            )
+        )
         page = next(
             section
             for section in json.loads(compiled.serialized)["sections"]
@@ -251,6 +258,10 @@ class ContextCompilerTests(unittest.TestCase):
 
         self.assertEqual(page["authority"], "refreshable_observation")
         self.assertFalse(page["content"]["is_authoritative"])
+        self.assertEqual(
+            page["content"]["search_filters"],
+            {"body_style": "SUV", "make": "BMW"},
+        )
 
     def test_failures_are_normalized_without_free_form_messages(self) -> None:
         failure = DealerFailure(
@@ -353,7 +364,7 @@ class ContextCompilerTests(unittest.TestCase):
         diagnostics = json.loads(compiled.diagnostics.to_json())
 
         self.assertEqual(diagnostics["compiler_policy_version"], 1)
-        self.assertEqual(diagnostics["tool_gate_policy_version"], 1)
+        self.assertEqual(diagnostics["tool_gate_policy_version"], 2)
         self.assertEqual(diagnostics["compiled_chars"], len(compiled.serialized))
         self.assertEqual(
             diagnostics["selected_order"],

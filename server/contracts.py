@@ -19,6 +19,7 @@ from webchat.harness.state import (
     ActionReference,
     MessageBlock,
     MessageRole,
+    PAGE_SEARCH_FILTER_FIELDS,
     PageContext,
     StructuredMessage,
 )
@@ -210,10 +211,11 @@ def _parse_action(value: object) -> ActionReference:
 def _parse_page(value: object, *, now: datetime) -> PageContext:
     if not isinstance(value, Mapping):
         raise ApiProblem(422, "invalid_request", "page_observation must be an object.")
-    _reject_unknown(value, {"current_url", "page_vehicle_id"})
+    _reject_unknown(value, {"current_url", "page_vehicle_id", "search_filters"})
     current_url = value.get("current_url")
     vehicle_id = value.get("page_vehicle_id")
-    if current_url is None and vehicle_id is None:
+    search_filters = _parse_search_filters(value.get("search_filters"))
+    if current_url is None and vehicle_id is None and not search_filters:
         raise ApiProblem(422, "invalid_request", "page_observation cannot be empty.")
     clean_url = None
     if current_url is not None:
@@ -236,9 +238,37 @@ def _parse_page(value: object, *, now: datetime) -> PageContext:
     return PageContext(
         current_url=clean_url,
         page_vehicle_id=vehicle_id,
+        search_filters=search_filters,
         observed_at=now,
         is_authoritative=False,
     )
+
+
+def _parse_search_filters(value: object) -> dict[str, str | int]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ApiProblem(422, "invalid_request", "search_filters must be an object.")
+    _reject_unknown(value, set(PAGE_SEARCH_FILTER_FIELDS))
+    result: dict[str, str | int] = {}
+    for name, item in value.items():
+        if name == "max_price_minor":
+            if (
+                isinstance(item, bool)
+                or not isinstance(item, int)
+                or not 0 <= item <= 1_000_000_000
+            ):
+                raise ApiProblem(
+                    422,
+                    "invalid_request",
+                    "max_price_minor has an invalid format.",
+                )
+            result[name] = item
+            continue
+        if not isinstance(item, str) or not item.strip() or len(item) > 100:
+            raise ApiProblem(422, "invalid_request", f"{name} has an invalid format.")
+        result[name] = item.strip()
+    return result
 
 
 def _reject_unknown(value: Mapping[str, Any], allowed: set[str]) -> None:

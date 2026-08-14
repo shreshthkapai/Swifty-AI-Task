@@ -14,6 +14,7 @@ from evals.verify import (
     build_report,
     load_examples,
     main,
+    parse_node_test_summary,
     parse_unittest_summary,
     run_suite,
 )
@@ -132,6 +133,25 @@ class ReviewerVerificationTests(unittest.TestCase):
         self.assertEqual(
             failed,
             {"tests": 9, "failures": 1, "errors": 2, "skipped": 1},
+        )
+
+    def test_node_summary_parses_component_test_counts(self) -> None:
+        successful = parse_node_test_summary(
+            "ℹ tests 15\nℹ pass 15\nℹ fail 0\nℹ skipped 0\n",
+            return_code=0,
+        )
+        failed = parse_node_test_summary(
+            "ℹ tests 15\nℹ pass 14\nℹ fail 1\nℹ skipped 0\n",
+            return_code=1,
+        )
+
+        self.assertEqual(
+            successful,
+            {"tests": 15, "failures": 0, "errors": 0, "skipped": 0},
+        )
+        self.assertEqual(
+            failed,
+            {"tests": 15, "failures": 1, "errors": 0, "skipped": 0},
         )
 
     def test_run_suite_executes_real_unittest_process(self) -> None:

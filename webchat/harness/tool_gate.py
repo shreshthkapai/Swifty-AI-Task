@@ -23,7 +23,7 @@ from .state import ConversationState, WorkflowDomain
 from .signals import DOMAIN_SIGNALS
 
 
-TOOL_GATE_POLICY_VERSION = 1
+TOOL_GATE_POLICY_VERSION = 2
 CommandName = ReadCommandName | PreparationCommandName
 
 
@@ -121,6 +121,16 @@ _CUSTOMER = {
     "phone": _nullable("string"),
 }
 
+_CLEARABLE_VEHICLE_FILTERS = (
+    "min_price_minor",
+    "max_price_minor",
+    "make",
+    "model",
+    "fuel_type",
+    "transmission",
+    "body_style",
+)
+
 _CATALOGUE = (
     _spec(
         ReadCommandName.SEARCH_VEHICLES,
@@ -148,6 +158,29 @@ _CATALOGUE = (
             "min_year": _nullable("integer"),
             "sort": _nullable("string", enum=["newest", "price_asc", "price_desc", "mileage_asc"]),
             "refinement": _nullable("string", enum=["lower_max_price", "cheaper_than_selected"]),
+            "clear_filters": {
+                "type": ["array", "null"],
+                "items": {
+                    "type": "string",
+                    "enum": list(_CLEARABLE_VEHICLE_FILTERS),
+                },
+                "maxItems": len(_CLEARABLE_VEHICLE_FILTERS),
+            },
+            "exclude_vehicle_ids": {
+                "type": ["array", "null"],
+                "items": {"type": "string"},
+                "maxItems": 20,
+            },
+            "exclude_models": {
+                "type": ["array", "null"],
+                "items": {"type": "string"},
+                "maxItems": 20,
+            },
+            "exclude_makes": {
+                "type": ["array", "null"],
+                "items": {"type": "string"},
+                "maxItems": 20,
+            },
             "page": _nullable("integer", minimum=1),
             "page_size": _nullable("integer", minimum=1),
         },
@@ -173,7 +206,7 @@ _CATALOGUE = (
     _spec(
         ReadCommandName.RETRIEVE_WORKSHOP_BOOKING,
         (W,),
-        "Verify customer identity and retrieve a workshop booking.",
+        "Verify customer identity and retrieve a workshop booking; copy every newly supplied or corrected identity field from the current input while the handler merges omitted known fields.",
         {"reference": _nullable("string"), "last_name": _nullable("string"), "registration": _nullable("string"), "phone": _nullable("string")},
     ),
     _spec(ReadCommandName.LIST_DEALERSHIPS, (D, S, T, W), "List dealership locations."),
@@ -189,7 +222,7 @@ _CATALOGUE = (
     _spec(
         PreparationCommandName.PREPARE_SALES_ENQUIRY,
         (S,),
-        "Prepare, but never send, a vehicle or general sales enquiry; use dealership_query for customer-facing location wording.",
+        "Prepare, but never send, a vehicle or general sales enquiry; capture the customer's stated reason in message and use dealership_query for customer-facing location wording.",
         {**_DEALERSHIP_REFERENCE, "enquiry_type": _nullable("string", enum=["general", "availability", "finance", "part_exchange"]), **_CUSTOMER, "message": _nullable("string"), **_VEHICLE_ID},
     ),
     _spec(
@@ -219,7 +252,7 @@ _CATALOGUE = (
     _spec(
         PreparationCommandName.PREPARE_WORKSHOP_AMENDMENT,
         (W,),
-        "Prepare an amendment to an authorised workshop booking; use slot_ordinal when the customer refers to an ordered fresh slot choice.",
+        "Use for an explicit amendment request even when verification or change details are missing; the handler enforces authorization and collects omissions. Use slot_ordinal for an ordered fresh slot choice.",
         {"booking_id": _nullable("string"), "slot_id": _nullable("string"), "slot_ordinal": _nullable("integer", minimum=1), "date_from": _nullable("string"), "date_to": _nullable("string"), "mileage": _nullable("integer", minimum=0), "notes": _nullable("string")},
     ),
     _spec(PreparationCommandName.PREPARE_WORKSHOP_CANCELLATION, (W,), "Prepare cancellation of an authorised workshop booking.", {"booking_id": _nullable("string")}),
@@ -396,7 +429,14 @@ class ToolGate:
         signalled_domains: Iterable[WorkflowDomain],
     ) -> InclusionReason | None:
         if active_domain is WorkflowDomain.NONE:
-            return InclusionReason.NO_ACTIVE_WORKFLOW
+            signalled_domains = tuple(signalled_domains)
+            if not signalled_domains:
+                return InclusionReason.NO_ACTIVE_WORKFLOW
+            if any(domain in spec.domains for domain in signalled_domains):
+                return InclusionReason.EXPLICIT_DOMAIN_SIGNAL
+            if spec.name in _SAFE_ENTRY_READS:
+                return InclusionReason.SAFE_CROSS_DOMAIN_ENTRY
+            return None
         if active_domain in spec.domains:
             return InclusionReason.CURRENT_DOMAIN
         if any(domain in spec.domains for domain in signalled_domains):

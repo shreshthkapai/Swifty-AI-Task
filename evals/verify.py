@@ -24,7 +24,11 @@ from evals.fixtures import FixtureRegistry
 from evals.reporting import detailed_report_data, write_report_atomic
 from evals.run import DetailedEvaluationReport, LaneKind, run_detailed_evaluation
 from evals.schema import Corpus, load_corpus
-from webchat.providers.openai import OpenAIPlanningProvider, OpenAIProviderConfig
+from webchat.providers.openai import (
+    OpenAIGroundedResponseProvider,
+    OpenAIPlanningProvider,
+    OpenAIProviderConfig,
+)
 
 
 REPORT_SCHEMA_VERSION = 1
@@ -37,6 +41,10 @@ EVALUATION_CLOCK = datetime(2026, 8, 13, 12, tzinfo=UTC)
 
 _RAN_PATTERN = re.compile(r"Ran (\d+) tests? in [0-9.]+s")
 _COUNT_PATTERN = re.compile(r"(failures|errors|skipped)=(\d+)")
+_NODE_COUNT_PATTERN = re.compile(
+    r"^[^A-Za-z0-9]*?(tests|pass|fail|skipped)\s+(\d+)\s*$",
+    re.MULTILINE,
+)
 _SENSITIVE_KEY_PARTS = ("api_key", "authorization", "cookie", "password", "secret", "token")
 _SECRET_VALUE = re.compile(r"\b(?:sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+)", re.IGNORECASE)
 _PII_VALUE = re.compile(
@@ -50,6 +58,7 @@ class SuiteSpec:
     name: str
     command: tuple[str, ...]
     cwd: Path
+    parser: str = "unittest"
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +99,20 @@ def parse_unittest_summary(output: str, *, return_code: int) -> dict[str, int]:
     return counts
 
 
+def parse_node_test_summary(output: str, *, return_code: int) -> dict[str, int]:
+    values = {name: int(value) for name, value in _NODE_COUNT_PATTERN.findall(output)}
+    if "tests" not in values or "fail" not in values:
+        raise ValueError("node test output did not contain a run summary")
+    if return_code != 0 and values["fail"] == 0:
+        raise ValueError("failed node test process did not report failures")
+    return {
+        "tests": values["tests"],
+        "failures": values["fail"],
+        "errors": 0,
+        "skipped": values.get("skipped", 0),
+    }
+
+
 def _failed_test_names(output: str) -> tuple[str, ...]:
     names = []
     for line in output.splitlines():
@@ -112,7 +135,12 @@ def run_suite(spec: SuiteSpec) -> SuiteResult:
     )
     duration_ms = (time.perf_counter() - started) * 1_000
     output = f"{completed.stdout}\n{completed.stderr}"
-    counts = parse_unittest_summary(output, return_code=completed.returncode)
+    if spec.parser == "unittest":
+        counts = parse_unittest_summary(output, return_code=completed.returncode)
+    elif spec.parser == "node":
+        counts = parse_node_test_summary(output, return_code=completed.returncode)
+    else:
+        raise ValueError(f"unknown suite parser: {spec.parser}")
     return SuiteResult(
         name=spec.name,
         command=spec.command,
@@ -293,6 +321,18 @@ def _suite_specs() -> tuple[SuiteSpec, ...]:
             ),
             ROOT / "dealership-platform",
         ),
+        SuiteSpec(
+            "web-ui",
+            (
+                "node",
+                "--test",
+                "tests/api.test.js",
+                "tests/render.test.js",
+                "tests/webchat.test.js",
+            ),
+            ROOT / "dealership-website",
+            parser="node",
+        ),
     )
 
 
@@ -336,22 +376,35 @@ async def _run_corpus(corpus: Corpus, lane: LaneKind) -> DetailedEvaluationRepor
 
     values = _local_environment()
     api_key = values.get("OPENAI_API_KEY", "").strip()
-    model = values.get("CHAT_MODEL", "").strip()
-    if not api_key or not model:
+    response_model = values.get("CHAT_MODEL", "").strip()
+    planner_model = values.get("CHAT_PLANNER_MODEL", response_model).strip()
+    if not api_key or not response_model or not planner_model:
         raise ValueError(
             "live-provider lane requires OPENAI_API_KEY and CHAT_MODEL in the environment or .env"
         )
     async with httpx.AsyncClient() as client:
-        provider = OpenAIPlanningProvider(
-            client,
-            OpenAIProviderConfig(
-                api_key=api_key,
-                model=model,
-                base_url=values.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-                timeout_seconds=float(values.get("CHAT_PROVIDER_TIMEOUT_SECONDS", "20")),
-            ),
+        planning_provider_config = OpenAIProviderConfig(
+            api_key=api_key,
+            model=planner_model,
+            base_url=values.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            timeout_seconds=float(values.get("CHAT_PROVIDER_TIMEOUT_SECONDS", "30")),
         )
-        driver = ProviderConversationDriver(registry, lambda: provider)
+        response_provider_config = OpenAIProviderConfig(
+            api_key=api_key,
+            model=response_model,
+            base_url=values.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            timeout_seconds=float(values.get("CHAT_PROVIDER_TIMEOUT_SECONDS", "30")),
+        )
+        provider = OpenAIPlanningProvider(client, planning_provider_config)
+        grounded_response = OpenAIGroundedResponseProvider(
+            client,
+            response_provider_config,
+        )
+        driver = ProviderConversationDriver(
+            registry,
+            lambda: provider,
+            lambda: grounded_response,
+        )
         return await run_detailed_evaluation(corpus, driver, lane=lane)
 
 
@@ -429,7 +482,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--example", metavar="ID")
-    parser.add_argument("--only", choices=("authored", "platform", "corpus"))
+    parser.add_argument("--only", choices=("authored", "platform", "ui", "corpus"))
     parser.add_argument("--scenario", metavar="ID")
     parser.add_argument(
         "--lane",
@@ -459,9 +512,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     selected_suite_names = {
-        None: {"authored", "supplied-platform"},
+        None: {"authored", "supplied-platform", "web-ui"},
         "authored": {"authored"},
         "platform": {"supplied-platform"},
+        "ui": {"web-ui"},
         "corpus": set(),
     }[args.only]
     suites = tuple(
@@ -474,7 +528,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         generated_at=datetime.now(UTC),
         python_version=platform.python_version(),
         total_scenarios=len(full_corpus.scenarios),
-        partial=args.scenario is not None or args.only in {"authored", "platform"},
+        partial=args.scenario is not None or args.only in {"authored", "platform", "ui"},
     )
     output_path = args.output if args.output.is_absolute() else ROOT / args.output
     write_report_atomic(output_path, report)

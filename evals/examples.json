@@ -10,23 +10,23 @@
       "risk": "scope",
       "source_test": "tests.conversations.test_runtime_answers.RuntimeQuestionTests.test_obvious_trivia_redirects_without_provider_or_dealer",
       "input": {"current_input": "What size is the moon?"},
-      "actual": {"model_calls": 0, "executed_commands": [], "blocks": [{"kind": "text", "payload": {"schema_version": 1, "text": "I can help with vehicles, test drives, sales, servicing, and Northstar dealership information."}}]}
+      "actual": {"model_calls": 0, "executed_commands": [], "blocks": [{"kind": "text", "payload": {"schema_version": 1, "text": "I can help with vehicles, test drives, sales, servicing, and dealership information."}}]}
     },
     {
       "id": "adjacent-family-suv",
       "title": "Useful dealership-adjacent advice remains in scope",
       "risk": "adjacent-advice",
-      "source_test": "tests.conversations.test_runtime_answers.RuntimeQuestionTests.test_family_suv_advice_uses_one_planning_call_and_no_dealer_tools",
+      "source_test": "tests.evals.test_corpus.CorpusContractTests.test_required_scope_questions_have_exact_routes",
       "input": {"current_input": "Is an SUV good for a family of five?"},
-      "actual": {"model_calls": 1, "executed_commands": [], "blocks": [{"kind": "text", "payload": {"schema_version": 1, "text": "An SUV can suit five people; compare rear-seat space, boot capacity, and running costs."}}]}
+      "actual": {"model_calls": 2, "executed_commands": [], "blocks": [{"kind": "text", "payload": {"schema_version": 1, "text": "For a family, compare passenger space, child-seat access, and boot capacity. An SUV can be a practical choice, and I can show current stock."}}, {"kind": "actions", "payload": {"schema_version": 1, "actions": [{"action_id": "id-1", "action_type": "switch_workflow", "entity_id": "vehicles", "label": "Search current stock"}]}}]}
     },
     {
       "id": "mixed-telescope-x3",
       "title": "Mixed trivia and vehicle request retains only the dealership intent",
       "risk": "scope",
-      "source_test": "tests.conversations.test_runtime_answers.RuntimeQuestionTests.test_mixed_moon_question_answers_only_vehicle_space_from_dealer_data",
+      "source_test": "tests.conversations.test_grounded_answers.GroundedConversationContractTests.test_mixed_request_answers_only_the_groundable_dealership_part",
       "input": {"current_input": "How big is the moon, and will my telescope fit in this X3?", "page_vehicle_id": "veh-003"},
-      "actual": {"model_calls": 1, "executed_commands": ["get_vehicle_details"], "blocks": [{"kind": "vehicle_cards", "payload": {"schema_version": 1, "vehicles": [{"id": "veh-003", "label": "2024 BMW X3 xDrive20d M Sport", "make": "BMW", "model": "X3", "variant": "xDrive20d M Sport", "year": 2024, "price": {"amount_minor": 4299500, "currency": "GBP", "display": "£42,995"}, "monthly_price": null, "mileage": 8000, "fuel_type": "Diesel", "transmission": "Automatic", "body_style": "SUV", "colour": "Blue", "availability": "available", "dealership_id": "northstar-manchester", "dealership_name": "Northstar Manchester", "image_url": "/x3.jpg"}], "actions": [{"action_id": "id-1", "action_type": "select_vehicle", "entity_id": "veh-003", "label": "View vehicle"}]}}, {"kind": "vehicle_details", "payload": {"schema_version": 1, "items": [{"description": "Dealer description", "highlights": ["Large boot"], "vehicle_id": "veh-003"}]}}, {"kind": "link", "payload": {"schema_version": 1, "label": "View on website", "href": "/?vehicle=veh-003"}}]}
+      "actual": {"model_calls": 2, "executed_commands": ["get_vehicle_details"], "blocks": [{"kind": "text", "payload": {"schema_version": 1, "text": "It has a published large boot, which may help with carrying a telescope. I cannot confirm it will fit without the telescope and boot dimensions, which are not published."}}, {"kind": "vehicle_cards", "payload": {"schema_version": 1, "vehicles": [{"id": "veh-003", "label": "2024 BMW X3 xDrive20d M Sport", "make": "BMW", "model": "X3", "variant": "xDrive20d M Sport", "year": 2024, "price": {"amount_minor": 4299500, "currency": "GBP", "display": "£42,995"}, "monthly_price": null, "mileage": 8000, "fuel_type": "Diesel", "transmission": "Automatic", "body_style": "SUV", "colour": "Blue", "availability": "available", "dealership_id": "northstar-manchester", "dealership_name": "Northstar Manchester", "image_url": "/x3.jpg"}], "actions": [{"action_id": "id-1", "action_type": "select_vehicle", "entity_id": "veh-003", "label": "View vehicle"}]}}, {"kind": "vehicle_details", "payload": {"schema_version": 1, "items": [{"description": "Dealer description", "highlights": ["Large boot"], "vehicle_id": "veh-003"}]}}, {"kind": "link", "payload": {"schema_version": 1, "label": "View on website", "href": "/?vehicle=veh-003"}}]}
     },
     {
       "id": "price-on-request",
@@ -34,7 +34,7 @@
       "risk": "business-truth",
       "source_test": "tests.webchat.harness.test_runtime.HarnessRuntimeTests.test_vehicle_search_updates_preferences_and_renders_unknown_price",
       "input": {"current_input": "Find a BMW under £30k"},
-      "actual": {"model_calls": 1, "executed_commands": ["search_vehicles"], "blocks": [{"kind": "vehicle_cards", "payload": {"schema_version": 1, "vehicles": [{"id": "veh-019", "label": "2024 BMW X3 xDrive20d M Sport", "make": "BMW", "model": "X3", "variant": "xDrive20d M Sport", "year": 2024, "price": {"amount_minor": null, "currency": null, "display": "Price on request"}, "monthly_price": null, "mileage": 8000, "fuel_type": "Diesel", "transmission": "Automatic", "body_style": "SUV", "colour": "Blue", "availability": "available", "dealership_id": "northstar-manchester", "dealership_name": "Northstar Manchester", "image_url": "/x3.jpg"}], "actions": [{"action_id": "id-1", "action_type": "select_vehicle", "entity_id": "veh-019", "label": "View vehicle"}]}}]}
+      "actual": {"model_calls": 2, "executed_commands": ["search_vehicles"], "blocks": [{"kind": "text", "payload": {"schema_version": 1, "text": "This vehicle's price is not published, so I cannot confirm it is within the £30,000 budget."}}, {"kind": "vehicle_cards", "payload": {"schema_version": 1, "vehicles": [{"id": "veh-019", "label": "2024 BMW X3 xDrive20d M Sport", "make": "BMW", "model": "X3", "variant": "xDrive20d M Sport", "year": 2024, "price": {"amount_minor": null, "currency": null, "display": "Price on request"}, "monthly_price": null, "mileage": 8000, "fuel_type": "Diesel", "transmission": "Automatic", "body_style": "SUV", "colour": "Blue", "availability": "available", "dealership_id": "northstar-manchester", "dealership_name": "Northstar Manchester", "image_url": "/x3.jpg"}], "actions": [{"action_id": "id-1", "action_type": "select_vehicle", "entity_id": "veh-019", "label": "View vehicle"}]}}]}
     },
     {
       "id": "reserved-confirm",
@@ -74,7 +74,7 @@
       "risk": "business-truth",
       "source_test": "tests.conversations.test_runtime_answers.RuntimeQuestionTests.test_bank_holiday_hours_render_the_authoritative_exception",
       "input": {"current_input": "What time is Manchester sales open on the upcoming bank holiday?"},
-      "actual": {"model_calls": 1, "executed_commands": ["get_dealership_hours"], "blocks": [{"kind": "opening_hours", "payload": {"schema_version": 1, "items": [{"kind": "holiday", "date": "2026-08-31", "label": "Summer bank holiday", "department": "sales", "closed": false, "opens_at": "10:00", "closes_at": "16:00"}]}}]}
+      "actual": {"model_calls": 2, "executed_commands": ["get_dealership_hours"], "blocks": [{"kind": "text", "payload": {"schema_version": 1, "text": "Manchester sales is published as open from 10:00 to 16:00 on the summer bank holiday."}}, {"kind": "opening_hours", "payload": {"schema_version": 1, "items": [{"kind": "holiday", "date": "2026-08-31", "label": "Summer bank holiday", "department": "sales", "closed": false, "opens_at": "10:00", "closes_at": "16:00"}]}}]}
     }
   ]
 }

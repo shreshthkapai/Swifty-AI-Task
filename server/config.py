@@ -78,14 +78,15 @@ def _http_base_url(value: str, name: str) -> str:
 class AppConfig:
     environment: str
     provider: str
-    model: str
+    response_model: str
+    planner_model: str
     openai_api_key: str = field(repr=False)
     northstar: NorthstarConfig = field(repr=False)
     openai_base_url: str = DEFAULT_OPENAI_BASE_URL
     database_path: Path = Path("data/webchat.sqlite3")
     allowed_origin: str = "http://localhost:4173"
     retention_days: int = 7
-    provider_timeout_seconds: float = 20.0
+    provider_timeout_seconds: float = 30.0
     database_timeout_seconds: float = 5.0
     max_body_bytes: int = 16_384
     max_message_chars: int = 4_000
@@ -95,8 +96,10 @@ class AppConfig:
             raise ValueError("CHAT_ENVIRONMENT must be local, development, test, or production")
         if self.provider != "openai":
             raise ValueError("CHAT_PROVIDER must name a configured planning provider")
-        if not isinstance(self.model, str) or not self.model.strip():
-            raise ValueError("model must be a non-empty string")
+        for name in ("response_model", "planner_model"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} must be a non-empty string")
         if not isinstance(self.openai_api_key, str) or not self.openai_api_key.strip():
             raise ValueError("openai_api_key must be configured server-side")
         if not isinstance(self.northstar, NorthstarConfig):
@@ -140,7 +143,7 @@ class AppConfig:
             raise ValueError("CHAT_PROVIDER must name a configured planning provider")
         environment = values.get("CHAT_ENVIRONMENT", "local").strip().lower()
         retention_days = _positive_int(values, "CHAT_RETENTION_DAYS", 7)
-        provider_timeout = _positive_float(values, "CHAT_PROVIDER_TIMEOUT_SECONDS", 20.0)
+        provider_timeout = _positive_float(values, "CHAT_PROVIDER_TIMEOUT_SECONDS", 30.0)
         database_timeout = _positive_float(values, "CHAT_DATABASE_TIMEOUT_SECONDS", 5.0)
         max_body = _positive_int(values, "CHAT_MAX_BODY_BYTES", 16_384)
         max_message = _positive_int(values, "CHAT_MAX_MESSAGE_CHARS", 4_000)
@@ -160,10 +163,15 @@ class AppConfig:
                 values, "NORTHSTAR_POOL_TIMEOUT_SECONDS", 2.0
             ),
         )
+        response_model = _required(values, "CHAT_MODEL")
+        planner_model = values.get("CHAT_PLANNER_MODEL", response_model).strip()
+        if not planner_model:
+            raise ValueError("CHAT_PLANNER_MODEL must be a non-empty string")
         return cls(
             environment=environment,
             provider=provider,
-            model=_required(values, "CHAT_MODEL"),
+            response_model=response_model,
+            planner_model=planner_model,
             openai_api_key=_required(values, "OPENAI_API_KEY"),
             openai_base_url=_http_base_url(
                 values.get("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL),

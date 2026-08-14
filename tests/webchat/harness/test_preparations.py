@@ -35,6 +35,17 @@ CUSTOMER_STATE = CustomerState(
     "Jamie", "Taylor", "jamie@example.com", "07700900123", "AB12 CDE"
 )
 
+_PREPARATION_DOMAINS = {
+    PreparationCommandName.PREPARE_SALES_ENQUIRY: WorkflowDomain.SALES,
+    PreparationCommandName.PREPARE_VEHICLE_INTEREST: WorkflowDomain.SALES,
+    PreparationCommandName.PREPARE_CALLBACK: WorkflowDomain.SALES,
+    PreparationCommandName.PREPARE_PART_EXCHANGE: WorkflowDomain.SALES,
+    PreparationCommandName.PREPARE_WORKSHOP_BOOKING: WorkflowDomain.WORKSHOP,
+    PreparationCommandName.PREPARE_WORKSHOP_AMENDMENT: WorkflowDomain.WORKSHOP,
+    PreparationCommandName.PREPARE_WORKSHOP_CANCELLATION: WorkflowDomain.WORKSHOP,
+    PreparationCommandName.PREPARE_DEALERSHIP_MESSAGE: WorkflowDomain.DEALERSHIP,
+}
+
 
 class PreparationWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def _prepare(self, name, arguments, *, state=None, configure=None):
@@ -47,9 +58,18 @@ class PreparationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             ResponseStrategy.ACTION_PREPARED,
         )
         harness, _ = runtime(fake, plan)
+        turn_state = state or ConversationState(customer=CUSTOMER_STATE)
+        if turn_state.workflow.domain is WorkflowDomain.NONE:
+            turn_state = replace(
+                turn_state,
+                workflow=WorkflowState(
+                    _PREPARATION_DOMAINS[name],
+                    WorkflowStage.DISCOVERY,
+                ),
+            )
         result = await harness.handle(TurnRequest(
             current_input="Prepare this dealership request",
-            state=state or ConversationState(customer=CUSTOMER_STATE),
+            state=turn_state,
             now=NOW,
         ))
         return fake, result
@@ -212,6 +232,26 @@ class PreparationWorkflowTests(unittest.IsolatedAsyncioTestCase):
                     [block.kind for block in result.blocks],
                     ["confirmation", "business_information"],
                 )
+
+    async def test_specific_sales_enquiry_uses_neutral_message_when_planner_omits_prose(self) -> None:
+        fake, result = await self._prepare(
+            PreparationCommandName.PREPARE_SALES_ENQUIRY,
+            {
+                "dealership_id": "northstar-manchester",
+                "enquiry_type": "finance",
+                "message": None,
+            },
+        )
+
+        self.assertEqual(
+            result.state.pending_action.request_payload_dict()["message"],
+            "Customer requested contact about finance.",
+        )
+        fake.get_business_information.assert_awaited_once_with()
+        self.assertEqual(
+            [block.kind for block in result.blocks],
+            ["confirmation", "business_information"],
+        )
 
     async def test_workshop_booking_null_arguments_reuse_structured_state(self) -> None:
         state = ConversationState(

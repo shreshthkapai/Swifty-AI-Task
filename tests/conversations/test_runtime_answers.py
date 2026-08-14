@@ -58,56 +58,10 @@ class RuntimeQuestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.model_calls, 0)
         self.assertEqual(
             result.blocks[0].to_dict()["payload"]["text"],
-            "I can help with vehicles, test drives, sales, servicing, and Northstar "
-            "dealership information.",
+            "I can help with vehicles, test drives, sales, servicing, and dealership "
+            "information.",
         )
         self.assertEqual(fake.method_calls, [])
-
-    async def test_family_suv_advice_uses_one_planning_call_and_no_dealer_tools(self) -> None:
-        fake = dealer()
-        plan = TurnPlan(
-            TurnScope.DEALERSHIP_ADJACENT,
-            (),
-            ResponseStrategy.ADJACENT_ADVICE,
-            adjacent_advice="An SUV can suit five people; compare rear-seat space, boot capacity, and running costs.",
-        )
-        harness, provider = runtime(fake, plan)
-
-        result = await harness.handle(TurnRequest(
-            current_input="Is an SUV good for a family of five?",
-            state=ConversationState(), now=NOW,
-        ))
-
-        self.assertEqual(len(provider.requests), 1)
-        self.assertEqual(result.model_calls, 1)
-        self.assertIn("rear-seat space", result.blocks[0].to_dict()["payload"]["text"])
-        self.assertEqual(result.blocks[1].kind, "actions")
-        self.assertEqual(
-            result.blocks[1].to_dict()["payload"]["actions"][0]["action_type"],
-            "switch_workflow",
-        )
-        self.assertEqual(fake.method_calls, [])
-
-    async def test_mixed_moon_question_answers_only_vehicle_space_from_dealer_data(self) -> None:
-        fake = dealer()
-        fake.get_vehicle.return_value = VehicleDetails(vehicle(), ("Large boot",))
-        plan = TurnPlan(
-            TurnScope.MIXED,
-            (ReadCommand.from_mapping(ReadCommandName.GET_VEHICLE_DETAILS, {"vehicle_id": "veh-003"}),),
-            ResponseStrategy.VEHICLE_DETAILS,
-            adjacent_advice="Ignore the unrelated trivia portion.",
-        )
-        harness, _ = runtime(fake, plan)
-
-        result = await harness.handle(TurnRequest(
-            current_input="How big is the moon, and will my telescope fit in this X3?",
-            state=ConversationState(), now=NOW,
-        ))
-
-        fake.get_vehicle.assert_awaited_once_with("veh-003")
-        serialized = [block.to_dict()["payload"] for block in result.blocks]
-        self.assertNotIn("moon", str(serialized).lower())
-        self.assertIn("Large boot", str(serialized))
 
     async def test_malformed_phone_requests_correction_before_any_booking_call(self) -> None:
         fake = dealer()
@@ -179,7 +133,8 @@ class RuntimeQuestionTests(unittest.IsolatedAsyncioTestCase):
             state=ConversationState(), now=NOW,
         ))
 
-        item = result.blocks[0].to_dict()["payload"]["items"][0]
+        hours = next(block for block in result.blocks if block.kind == "opening_hours")
+        item = hours.to_dict()["payload"]["items"][0]
         self.assertEqual(item["kind"], "holiday")
         self.assertEqual(item["opens_at"], "10:00")
         self.assertEqual(item["closes_at"], "16:00")

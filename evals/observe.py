@@ -9,6 +9,7 @@ from evals.fixtures import DealerSnapshot
 from evals.run import ObservedAnswer, ObservedTurn
 from webchat.harness.actions import PendingActionState, PendingActionType
 from webchat.harness.contracts import HarnessCommand, ResponseStrategy
+from webchat.harness.evidence import EvidenceItem
 from webchat.harness.runtime import TurnResult
 from webchat.harness.state import ConversationState, WorkflowDomain
 
@@ -292,11 +293,25 @@ def observe_turn(
         _append(facts, "parts_phone")
     if "search_vehicles" in command_names and "cheaper" in current_input.casefold():
         _append(facts, "lower_priced_results", "lower_than_selected_price")
+    if any(
+        isinstance(item, EvidenceItem)
+        and item.source_operation == "search_vehicles"
+        and item.entity_id == "vehicle_search"
+        and item.field_name == "result_count"
+        and item.value == 0
+        for item in result.evidence
+    ):
+        _append(facts, "zero_results")
+        _append(next_steps, "relax_constraints")
     rendered_text = " ".join(text_parts).casefold()
     family_considerations = (
-        ("rear-seat", "rear seat", "rear-legroom", "rear legroom"),
-        ("boot", "luggage space"),
-        ("child-seat", "child seat", "isofix"),
+        (
+            "rear-seat", "rear seat", "rear-legroom", "rear legroom",
+            "second-row", "second row", "passenger space", "passenger room",
+            "space you", "space needs", "cabin space",
+        ),
+        ("boot", "cargo", "luggage", "stroller"),
+        ("child-seat", "child seat", "isofix", "child restraint"),
         ("running costs", "fuel economy"),
     )
     if sum(any(term in rendered_text for term in group) for group in family_considerations) >= 2:
@@ -313,7 +328,7 @@ def observe_turn(
         _append(facts, "location_changed")
 
     code_facts = {
-        "no_vehicles": ("zero_results",),
+        "no_vehicle_results": ("zero_results",),
         "slot_unavailable": ("slot_unavailable", "refreshed_slots"),
         "idempotency_conflict": ("idempotency_conflict", "original_booking_reference"),
         "no_workshop_slots": ("zero_slots_valid_availability",),
@@ -326,7 +341,7 @@ def observe_turn(
     }
     code_steps = {
         "invalid_phone": ("provide_valid_phone",),
-        "no_vehicles": ("relax_constraints",),
+        "no_vehicle_results": ("relax_constraints",),
         "no_workshop_slots": ("later_dates_or_other_location",),
         "verification_failed": ("recheck_all_identity_fields",),
         "verification_required": ("provide_lookup_identity",),
@@ -342,6 +357,10 @@ def observe_turn(
         price_conflict = (
             "budget conflict" in clarification_text
             or "budget conflicts" in clarification_text
+            or (
+                "conflict" in clarification_text
+                and any(term in clarification_text for term in ("price", "budget", "limit"))
+            )
             or (
                 "under" in clarification_text
                 and "at least" in clarification_text
@@ -391,7 +410,7 @@ def observe_turn(
             _append(facts, "new_slot_summary")
     if "holiday_service_closed" in facts:
         _append(next_steps, "choose_another_date")
-    if planning_strategy is ResponseStrategy.ADJACENT_ADVICE and any(
+    if planning_strategy is ResponseStrategy.GENERAL_GUIDANCE and any(
         any(verb in text.casefold() for verb in ("show", "find", "browse", "see"))
         and "stock" in text.casefold()
         for text in text_parts

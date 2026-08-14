@@ -17,8 +17,22 @@ from .contracts import (
     PreparationCommandName,
     ReadCommand,
     ReadCommandName,
+    ResponseMode,
     ResponseStrategy,
-    TurnScope,
+)
+from .evidence import EvidenceEnvelope, EvidenceGapReason, EvidenceRecord, EvidenceReference
+from .grounded_response import (
+    GroundedResponseRequest,
+    GroundedResponseState,
+    allowed_actions_from_blocks,
+    assemble_evidence,
+    focusable_entity_ids_from_blocks,
+)
+from .grounded_validation import (
+    GroundedRepairContext,
+    GroundedResponseValidationError,
+    GroundedResponseValidator,
+    GroundedValidationCode,
 )
 from .planning import PlanningEngine, TurnRequest
 from .policy import PolicyEngine
@@ -39,6 +53,14 @@ from .workflows.mutations import execute_confirmed_action
 from .workflows.sales import execute_sales_preparation, execute_sales_read
 from .workflows.vehicles import execute_vehicle_read
 from .workflows.workshop import execute_workshop_preparation, execute_workshop_read
+from webchat.providers.base import (
+    GroundedResponseOutputError,
+    GroundedResponseProvider,
+    GroundedResponseProviderError,
+    GroundedResponseResult,
+    PlanningOutputError,
+    PlanningProviderError,
+)
 
 
 def _random_id() -> str:
@@ -69,12 +91,26 @@ SUPPORTED_UI_ACTION_TYPES = frozenset(
 class TurnResult:
     state: ConversationState
     blocks: tuple[MessageBlock, ...]
+    evidence: tuple[EvidenceRecord, ...] = ()
     executed_commands: tuple[str, ...] = ()
     model_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     provider_latency_ms: float = 0
     deterministic_route: DeterministicRouteKind | None = None
+    planner_failure: str | None = None
+    provider_failure: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _GroundedOutcome:
+    blocks: tuple[MessageBlock, ...]
+    model_calls: int
+    input_tokens: int = 0
+    output_tokens: int = 0
+    latency_ms: float = 0
+    failure: str | None = None
+    focused_entity_id: str | None = None
 
 
 class HarnessRuntime:
@@ -85,23 +121,42 @@ class HarnessRuntime:
         *,
         dealer: DealerAdapter,
         planning: PlanningEngine,
+        grounded_response: GroundedResponseProvider,
         id_factory: Callable[[], str] = _random_id,
         policy: PolicyEngine | None = None,
         renderer: DeclarativeRenderer | None = None,
+        response_validator: GroundedResponseValidator | None = None,
     ) -> None:
         self._dealer = dealer
         self._planning = planning
+        self._grounded_response = grounded_response
         self._id_factory = id_factory
         self._policy = policy or PolicyEngine()
         self._renderer = renderer or DeclarativeRenderer(id_factory=id_factory)
+        self._response_validator = response_validator or GroundedResponseValidator()
 
     async def handle(self, request: TurnRequest) -> TurnResult:
-        decision = await self._planning.decide(request)
         turn_state = (
             request.state
             if request.page_observation is None
             else replace(request.state, context=request.page_observation)
         )
+        try:
+            decision = await self._planning.decide(request)
+        except PlanningOutputError as exc:
+            return TurnResult(
+                state=turn_state,
+                blocks=(self._provider_recovery(),),
+                model_calls=1,
+                planner_failure=exc.kind.value,
+            )
+        except PlanningProviderError as exc:
+            return TurnResult(
+                state=turn_state,
+                blocks=(self._provider_recovery(),),
+                model_calls=1,
+                provider_failure=exc.kind.value,
+            )
         if decision.deterministic_route is not None:
             outcome = await self._execute_route(
                 decision.deterministic_route,
@@ -110,30 +165,47 @@ class HarnessRuntime:
             return TurnResult(
                 state=outcome.state,
                 blocks=outcome.blocks,
+                evidence=outcome.evidence,
                 deterministic_route=decision.deterministic_route.kind,
             )
 
         planning_result = decision.planning_result
         plan = planning_result.plan
         if not plan.commands:
-            blocks = self._render_direct(plan.response_strategy, plan.clarification_question, plan.adjacent_advice)
+            blocks = self._render_direct(
+                plan.response_strategy,
+                plan.response_mode,
+                plan.clarification_question,
+            )
+            response = None
+            if plan.response_mode is ResponseMode.GROUNDED_ANSWER:
+                response = await self._respond(
+                    question=request.current_input,
+                    state=turn_state,
+                    evidence=(),
+                    blocks=blocks,
+                    now=request.now,
+                )
+                blocks = response.blocks
             return TurnResult(
                 state=turn_state,
                 blocks=blocks,
-                model_calls=1,
-                input_tokens=planning_result.usage.input_tokens,
-                output_tokens=planning_result.usage.output_tokens,
-                provider_latency_ms=planning_result.latency_ms,
+                model_calls=1 + (0 if response is None else response.model_calls),
+                input_tokens=planning_result.usage.input_tokens + (
+                    0 if response is None else response.input_tokens
+                ),
+                output_tokens=planning_result.usage.output_tokens + (
+                    0 if response is None else response.output_tokens
+                ),
+                provider_latency_ms=planning_result.latency_ms + (
+                    0 if response is None else response.latency_ms
+                ),
+                provider_failure=None if response is None else response.failure,
             )
 
         state = self._supersede_for_switch(turn_state, plan.commands)
         blocks: list[MessageBlock] = []
-        if (
-            plan.scope is TurnScope.MIXED
-            and plan.adjacent_advice is not None
-            and self._policy.is_safe_adjacent_advice(plan.adjacent_advice)
-        ):
-            blocks.append(self._renderer.text(plan.adjacent_advice))
+        evidence: list[EvidenceRecord] = []
         executed: list[str] = []
         for command in plan.commands:
             executed.append(command.name.value)
@@ -153,15 +225,257 @@ class HarnessRuntime:
                 )
             state = outcome.state
             blocks.extend(outcome.blocks)
+            evidence.extend(outcome.evidence)
+        response = None
+        final_blocks = tuple(blocks)
+        if plan.response_mode is ResponseMode.GROUNDED_ANSWER and evidence:
+            response = await self._respond(
+                question=request.current_input,
+                state=state,
+                evidence=tuple(evidence),
+                blocks=final_blocks,
+                now=request.now,
+            )
+            final_blocks = response.blocks
+            state, final_blocks = self._apply_response_focus(
+                state,
+                final_blocks,
+                response.focused_entity_id,
+            )
         return TurnResult(
             state=state,
-            blocks=tuple(blocks),
+            blocks=final_blocks,
+            evidence=tuple(evidence),
             executed_commands=tuple(executed),
-            model_calls=1,
-            input_tokens=planning_result.usage.input_tokens,
-            output_tokens=planning_result.usage.output_tokens,
-            provider_latency_ms=planning_result.latency_ms,
+            model_calls=1 + (0 if response is None else response.model_calls),
+            input_tokens=planning_result.usage.input_tokens + (
+                0 if response is None else response.input_tokens
+            ),
+            output_tokens=planning_result.usage.output_tokens + (
+                0 if response is None else response.output_tokens
+            ),
+            provider_latency_ms=planning_result.latency_ms + (
+                0 if response is None else response.latency_ms
+            ),
+            provider_failure=None if response is None else response.failure,
         )
+
+    async def _respond(
+        self,
+        *,
+        question: str | None,
+        state: ConversationState,
+        evidence: tuple[EvidenceRecord, ...],
+        blocks: tuple[MessageBlock, ...],
+        now: datetime,
+    ) -> _GroundedOutcome:
+        if question is None:
+            raise ValueError("grounded responses require the customer's current question")
+        envelope = assemble_evidence(evidence, generated_at=now)
+        request = GroundedResponseRequest(
+            question=question,
+            state=GroundedResponseState.from_conversation(state),
+            evidence=envelope,
+            missing_facts=tuple(
+                EvidenceReference(item.evidence_id)
+                for item in envelope.gaps
+                if item.reason in {
+                    EvidenceGapReason.NOT_PUBLISHED,
+                    EvidenceGapReason.REDACTED,
+                }
+            ),
+            allowed_actions=allowed_actions_from_blocks(blocks),
+            focusable_entity_ids=focusable_entity_ids_from_blocks(blocks),
+        )
+        calls = 0
+        input_tokens = 0
+        output_tokens = 0
+        latency_ms = 0.0
+        last_violations = (GroundedValidationCode.INVALID_OUTPUT,)
+
+        for attempt in range(2):
+            calls += 1
+            try:
+                result = await self._grounded_response.respond(request)
+            except GroundedResponseProviderError as exc:
+                kind = exc.kind.value
+                if exc.status_code is not None:
+                    kind = f"{kind}:{exc.status_code}"
+                prefix = "grounded_response" if attempt == 0 else "grounded_response:repair_failed"
+                return _GroundedOutcome(
+                    self._grounded_fallback(
+                        envelope,
+                        blocks,
+                        repaired=attempt > 0,
+                    ),
+                    calls,
+                    input_tokens,
+                    output_tokens,
+                    latency_ms,
+                    f"{prefix}:{kind}",
+                )
+            except GroundedResponseOutputError:
+                violations = (GroundedValidationCode.INVALID_OUTPUT,)
+            else:
+                if not isinstance(result, GroundedResponseResult):
+                    violations = (GroundedValidationCode.INVALID_OUTPUT,)
+                else:
+                    input_tokens += result.usage.input_tokens
+                    output_tokens += result.usage.output_tokens
+                    latency_ms += result.latency_ms
+                    try:
+                        self._response_validator.validate(
+                            request,
+                            result.claims,
+                            result.focused_entity_id,
+                        )
+                    except GroundedResponseValidationError as exc:
+                        violations = tuple(
+                            sorted({item.code for item in exc.issues})
+                        )
+                    else:
+                        text = " ".join(claim.text.strip() for claim in result.claims)
+                        return _GroundedOutcome(
+                            (self._renderer.text(text),) + blocks,
+                            calls,
+                            input_tokens,
+                            output_tokens,
+                            latency_ms,
+                            focused_entity_id=result.focused_entity_id,
+                        )
+
+            last_violations = violations
+            if attempt == 0:
+                request = replace(
+                    request,
+                    repair=GroundedRepairContext(violations),
+                )
+                continue
+
+        failure = ",".join(item.value for item in last_violations)
+        return _GroundedOutcome(
+            self._grounded_fallback(envelope, blocks, repaired=True),
+            calls,
+            input_tokens,
+            output_tokens,
+            latency_ms,
+            f"grounded_response:repair_failed:{failure}",
+        )
+
+    @staticmethod
+    def _apply_response_focus(
+        state: ConversationState,
+        blocks: tuple[MessageBlock, ...],
+        focused_entity_id: str | None,
+    ) -> tuple[ConversationState, tuple[MessageBlock, ...]]:
+        if focused_entity_id is None:
+            return state, blocks
+        matching_types = {
+            reference.entity_type
+            for block in blocks
+            for reference in block.entity_references
+            if reference.entity_id == focused_entity_id
+        }
+        if "vehicle" not in matching_types:
+            return state, blocks
+        focused_state = replace(
+            state,
+            entities=replace(
+                state.entities,
+                selected_vehicle_id=focused_entity_id,
+            ),
+        )
+        decorated: list[MessageBlock] = []
+        focused_orders: list[tuple[str, ...]] = []
+        for block in blocks:
+            if block.kind != "vehicle_cards" or not any(
+                reference.entity_type == "vehicle"
+                and reference.entity_id == focused_entity_id
+                for reference in block.entity_references
+            ):
+                decorated.append(block)
+                continue
+            value = block.to_dict()
+            payload = value["payload"]
+            payload["recommended_entity_id"] = focused_entity_id
+            vehicles = payload.get("vehicles", [])
+            ordered_vehicles = sorted(
+                vehicles,
+                key=lambda item: item.get("id") != focused_entity_id,
+            )
+            payload["vehicles"] = ordered_vehicles
+            ordered_ids = tuple(item["id"] for item in ordered_vehicles)
+            focused_orders.append(ordered_ids)
+            positions = {
+                entity_id: index for index, entity_id in enumerate(ordered_ids)
+            }
+            payload["actions"] = sorted(
+                payload.get("actions", []),
+                key=lambda item: positions.get(item.get("entity_id"), len(positions)),
+            )
+            value["entity_references"] = sorted(
+                value["entity_references"],
+                key=lambda item: positions.get(item.get("entity_id"), len(positions)),
+            )
+            action_positions = {
+                item.get("action_id"): index
+                for index, item in enumerate(payload["actions"])
+            }
+            value["action_references"] = sorted(
+                value["action_references"],
+                key=lambda item: action_positions.get(
+                    item.get("action_id"), len(action_positions)
+                ),
+            )
+            decorated.append(MessageBlock.from_dict(value))
+        groups = list(focused_state.presentation_groups)
+        for ordered_ids in focused_orders:
+            for index in range(len(groups) - 1, -1, -1):
+                group = groups[index]
+                existing = {item.entity_id: item for item in group.entities}
+                if group.entity_type != "vehicle" or set(existing) != set(ordered_ids):
+                    continue
+                groups[index] = replace(
+                    group,
+                    entities=tuple(
+                        replace(existing[entity_id], ordinal=ordinal)
+                        for ordinal, entity_id in enumerate(ordered_ids, start=1)
+                    ),
+                )
+                break
+        focused_state = replace(focused_state, presentation_groups=tuple(groups))
+        return focused_state, tuple(decorated)
+
+    def _grounded_fallback(
+        self,
+        envelope: EvidenceEnvelope,
+        blocks: tuple[MessageBlock, ...],
+        *,
+        repaired: bool,
+    ) -> tuple[MessageBlock, ...]:
+        if envelope.items:
+            text = (
+                "I couldn't verify a complete answer. The confirmed dealership "
+                "information is shown below."
+            )
+            if envelope.gaps:
+                field_names = tuple(sorted(
+                    {item.field_name.replace("_", " ") for item in envelope.gaps}
+                ))
+                fields = ", ".join(field_names)
+                verb = "is" if len(field_names) == 1 else "are"
+                text = (
+                    f"I couldn't verify a complete answer because {fields} {verb} not "
+                    "confirmed in the dealership data. The confirmed dealership "
+                    "information is shown below."
+                )
+        else:
+            text = (
+                "I couldn't verify a reliable answer from the available information "
+                "just now."
+            )
+        code = "grounded_response_fallback" if repaired else "grounded_response_unavailable"
+        return (self._renderer.notice(text, code=code),) + blocks
 
     async def _execute_command(self, command, *, state: ConversationState, now: datetime) -> CommandOutcome:
         arguments = command.to_dict()["arguments"]
@@ -214,7 +528,7 @@ class HarnessRuntime:
                 (
                     self._renderer.text(
                         "I can help with vehicles, test drives, sales, servicing, and "
-                        "Northstar dealership information."
+                        "dealership information."
                     ),
                 ),
             )
@@ -437,30 +751,28 @@ class HarnessRuntime:
             return state
         return replace(state, pending_action=None)
 
-    def _render_direct(self, strategy, clarification, advice) -> tuple[MessageBlock, ...]:
-        if strategy is ResponseStrategy.MISSING_INFORMATION:
+    def _render_direct(self, strategy, mode, clarification) -> tuple[MessageBlock, ...]:
+        if mode is ResponseMode.CLARIFICATION:
             return (self._renderer.notice(clarification, code="missing_information"),)
-        if strategy is ResponseStrategy.ADJACENT_ADVICE:
-            if self._policy.is_safe_adjacent_advice(advice):
-                return (
-                    self._renderer.text(advice),
-                    self._renderer.actions(
-                        ((
-                            "switch_workflow",
-                            "Search current stock",
-                            WorkflowDomain.VEHICLES.value,
-                        ),)
-                    ),
-                )
+        if strategy is ResponseStrategy.GENERAL_GUIDANCE:
             return (
-                self._renderer.notice(
-                    "I can offer general vehicle guidance, but current prices and availability must come from a dealership search.",
-                    code="dealer_facts_require_lookup",
+                self._renderer.actions(
+                    ((
+                        "switch_workflow",
+                        "Search current stock",
+                        WorkflowDomain.VEHICLES.value,
+                    ),)
                 ),
             )
         if strategy is ResponseStrategy.DOMAIN_REDIRECT:
             return (self._renderer.text("I can help with vehicles, test drives, sales, servicing, and dealership information."),)
         return (self._renderer.notice("Understood.", code="acknowledgement"),)
+
+    def _provider_recovery(self) -> MessageBlock:
+        return self._renderer.notice(
+            "I'm temporarily unable to work that out. Please try again.",
+            code="provider_unavailable",
+        )
 
 
 def _resolve_presented_action(state: ConversationState, reference: ActionReference) -> str | None:
