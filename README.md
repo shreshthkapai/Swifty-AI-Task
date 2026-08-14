@@ -20,27 +20,66 @@ for the runtime decisions, extension boundaries, and test strategy.
 
 ## Run locally
 
-Requirements: Docker with Compose and ports `4010`, `4020`, and `4173` available.
+Requirements: Docker Desktop with Compose running and ports `4010`, `4020`, and `4173` available.
 
-1. Copy `.env.example` to `.env` and set `OPENAI_API_KEY`. `CHAT_MODEL` selects the grounded-answer
-   model; optional `CHAT_PLANNER_MODEL` selects a faster planning model. Keys remain server-side.
-2. Start the complete product:
+### Windows (PowerShell)
 
-   ```bash
-   docker compose up --build -d
-   ```
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
 
-3. Open the dealership website at http://localhost:4173.
+Set `OPENAI_API_KEY` in `.env`, then start the product:
 
-Supporting services:
+```powershell
+docker compose up --build -d
+Start-Process http://localhost:4173
+```
+
+Check the services and chat API:
+
+```powershell
+docker compose ps
+Invoke-RestMethod http://localhost:4020/health
+```
+
+### macOS
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Set `OPENAI_API_KEY` in `.env`, save with `Ctrl+O`, Enter, then exit with `Ctrl+X`. Start the
+product and open the website:
+
+```bash
+docker compose up --build -d
+open http://localhost:4173
+```
+
+Check the services and chat API:
+
+```bash
+docker compose ps
+curl --fail http://localhost:4020/health
+```
+
+`CHAT_MODEL` selects the grounded-answer model; optional `CHAT_PLANNER_MODEL` selects a faster
+planning model. The API key remains server-side and `.env` is ignored by Git.
+
+### Common operations
+
+The complete product is available at http://localhost:4173. Supporting services are:
 
 - chat health: http://localhost:4020/health
 - supplied API documentation: http://localhost:4010/docs
 - supplied dealership console: http://localhost:4010/admin
 
-Reset deterministic dealership data with `./reset.sh` or `.\reset.ps1`. Stop services with
-`docker compose down`. Anonymous chat and dealership data remain in Docker volumes until reset or
-volume removal.
+Reset deterministic dealership data with `./reset.sh` on macOS or `.\reset.ps1` in PowerShell.
+Stop all services with `docker compose down`. SQLite schemas are created automatically; no manual
+database setup or migration command is required. Anonymous chat and dealership data remain in
+Docker volumes until reset or volume removal.
 
 ## Verify
 
