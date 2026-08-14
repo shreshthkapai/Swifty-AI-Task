@@ -182,7 +182,11 @@ class ConversationRuntime(HarnessRuntime):
         continuation_request = ConversationRequest(
             context=context,
             tools=tools,
-            exchange=ToolExchange(first.tool_calls, tuple(results)),
+            exchange=ToolExchange(
+                first.tool_calls,
+                tuple(results),
+                continuation=first.continuation,
+            ),
         )
         try:
             final = await self._conversation.converse(continuation_request)

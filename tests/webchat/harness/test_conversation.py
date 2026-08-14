@@ -94,9 +94,11 @@ class ConversationContractTests(unittest.TestCase):
                 ConversationToolResult("call-1", "search_vehicles", {"count": 2}),
                 ConversationToolResult("call-2", "get_dealership_hours", {"open": True}),
             ),
+            continuation='[{"type":"reasoning"}]',
         )
 
         self.assertEqual(tuple(item.call_id for item in exchange.results), ("call-1", "call-2"))
+        self.assertEqual(exchange.continuation, '[{"type":"reasoning"}]')
         with self.assertRaises(ValueError):
             ToolExchange(
                 calls=(first, first),

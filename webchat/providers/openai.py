@@ -20,6 +20,12 @@ from webchat.harness.contracts import (
     TurnScope,
 )
 from webchat.harness.planning import PlanValidationError, parse_planning_output
+from webchat.harness.conversation import (
+    ConversationRequest,
+    ConversationResult,
+    ConversationToolCall,
+    ConversationUsage,
+)
 from webchat.harness.evidence import EvidenceReference
 from webchat.harness.grounded_response import (
     GROUNDED_RESPONSE_RESULT_SCHEMA_VERSION,
@@ -30,6 +36,8 @@ from webchat.harness.grounded_response import (
 )
 
 from .base import (
+    ConversationProviderError,
+    TextDeltaCallback,
     PlanningOutputError,
     PlanningOutputErrorKind,
     PlanningProviderError,
@@ -103,6 +111,20 @@ the answer explicitly chooses or recommends one focusable entity, and cite that 
 the recommendation claim; otherwise return null. Return only the required JSON response."""
 
 
+_CONVERSATION_INSTRUCTIONS = """You are a concise, natural car-dealership assistant.
+Answer the customer's actual question directly. Use the supplied conversation state and recent
+messages to resolve follow-ups. Call the available semantic tools whenever current dealership facts
+or an action are required; never invent inventory, pricing, availability, opening hours, slots,
+offers, bookings, or customer records. You may call multiple independent read tools together, but
+never combine a preparation or action-control tool with another tool. After tool results arrive,
+answer using only their facts for dealership-specific claims, state important unknowns plainly, and
+do not call another tool. Consequential operations must be prepared and then explicitly confirmed;
+never claim a mutation succeeded unless its tool result says so. Give useful general automotive
+guidance when asked, clearly separating it from dealer facts. For mixed requests, answer the useful
+dealership portion without becoming a general trivia assistant. Keep answers conversational and
+brief; supporting cards and actions are rendered separately."""
+
+
 @dataclass(frozen=True, slots=True)
 class OpenAIProviderConfig:
     api_key: str = field(repr=False)
@@ -145,6 +167,221 @@ class _GroundedWireContext:
             if candidate == alias:
                 return stable_id
         raise ValueError(f"unknown evidence alias: {alias}")
+
+
+class OpenAIConversationProvider:
+    """One stateless Responses API conversation with one bounded tool continuation."""
+
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        config: OpenAIProviderConfig,
+        *,
+        monotonic: Callable[[], float] = time.perf_counter,
+    ) -> None:
+        if not isinstance(client, httpx.AsyncClient):
+            raise ValueError("client must be an httpx.AsyncClient")
+        if not isinstance(config, OpenAIProviderConfig):
+            raise ValueError("config must be OpenAIProviderConfig")
+        if not callable(monotonic):
+            raise ValueError("monotonic must be callable")
+        self._client = client
+        self._config = config
+        self._monotonic = monotonic
+
+    async def converse(
+        self,
+        request: ConversationRequest,
+        *,
+        on_text_delta: TextDeltaCallback | None = None,
+    ) -> ConversationResult:
+        if not isinstance(request, ConversationRequest):
+            raise ValueError("request must be a ConversationRequest")
+        if on_text_delta is not None and not callable(on_text_delta):
+            raise ValueError("on_text_delta must be callable or None")
+        started = self._monotonic()
+        try:
+            response = await self._client.post(
+                f"{self._config.base_url}/responses",
+                headers={
+                    "Authorization": f"Bearer {self._config.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=self._request_body(request),
+                timeout=self._config.timeout_seconds,
+            )
+        except httpx.TimeoutException as exc:
+            raise ConversationProviderError(
+                ProviderErrorKind.TIMEOUT,
+                retryable=True,
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ConversationProviderError(
+                ProviderErrorKind.TRANSPORT,
+                retryable=True,
+            ) from exc
+        elapsed_ms = (self._monotonic() - started) * 1_000
+        if response.status_code >= 400:
+            raise ConversationProviderError(
+                ProviderErrorKind.HTTP_ERROR,
+                retryable=(
+                    response.status_code in {408, 409, 429}
+                    or response.status_code >= 500
+                ),
+                status_code=response.status_code,
+            )
+        try:
+            result = self._parse_response(response.json(), latency_ms=elapsed_ms)
+        except ConversationProviderError:
+            raise
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ConversationProviderError(
+                ProviderErrorKind.INVALID_RESPONSE,
+                retryable=False,
+            ) from exc
+        if result.text is not None and on_text_delta is not None:
+            await on_text_delta(result.text)
+        return result
+
+    def _request_body(self, request: ConversationRequest) -> dict[str, Any]:
+        exchange = request.exchange
+        body: dict[str, Any] = {
+            "model": self._config.model,
+            "store": False,
+            "instructions": _CONVERSATION_INSTRUCTIONS,
+            "input": [{"role": "user", "content": request.context}],
+            "tools": [_conversation_tool(item) for item in request.tools],
+            "tool_choice": "none" if exchange is not None else "auto",
+            "parallel_tool_calls": exchange is None,
+            "max_output_tokens": self._config.max_output_tokens,
+        }
+        if exchange is None:
+            return body
+        if exchange.continuation is None:
+            raise ValueError("OpenAI tool continuations require prior output items")
+        previous_output = json.loads(exchange.continuation)
+        if not isinstance(previous_output, list) or not all(
+            isinstance(item, Mapping) for item in previous_output
+        ):
+            raise ValueError("OpenAI continuation must encode an output-item array")
+        body["input"].extend(previous_output)
+        for result in exchange.results:
+            body["input"].append({
+                "type": "function_call_output",
+                "call_id": result.call_id,
+                "output": json.dumps(
+                    result.output_dict(),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            })
+        return body
+
+    @staticmethod
+    def _parse_response(value: object, *, latency_ms: float) -> ConversationResult:
+        if not isinstance(value, Mapping) or value.get("status") != "completed":
+            raise ValueError("response must be a completed object")
+        output = value.get("output")
+        if not isinstance(output, list):
+            raise ValueError("response output must be an array")
+        calls: list[ConversationToolCall] = []
+        texts: list[str] = []
+        refused = False
+        for item in output:
+            if not isinstance(item, Mapping):
+                raise ValueError("response output items must be objects")
+            if item.get("type") == "function_call":
+                arguments = item.get("arguments")
+                if not isinstance(arguments, str):
+                    raise ValueError("function arguments must be JSON text")
+                decoded = json.loads(arguments)
+                if not isinstance(decoded, Mapping):
+                    raise ValueError("function arguments must encode an object")
+                calls.append(ConversationToolCall(
+                    call_id=item.get("call_id"),
+                    name=item.get("name"),
+                    arguments=decoded,
+                ))
+            elif item.get("type") == "message":
+                content = item.get("content")
+                if not isinstance(content, list):
+                    raise ValueError("message content must be an array")
+                for part in content:
+                    if not isinstance(part, Mapping):
+                        raise ValueError("message content items must be objects")
+                    if part.get("type") == "refusal":
+                        refused = True
+                    elif part.get("type") == "output_text":
+                        text = part.get("text")
+                        if not isinstance(text, str) or not text.strip():
+                            raise ValueError("output_text must contain text")
+                        texts.append(text)
+        if refused:
+            raise ConversationProviderError(
+                ProviderErrorKind.REFUSAL,
+                retryable=False,
+            )
+        if calls and texts:
+            raise ValueError("response cannot mix customer text and function calls")
+        if calls:
+            text = None
+            continuation = json.dumps(
+                output,
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            first_token_ms = None
+        else:
+            if len(texts) != 1:
+                raise ValueError("response must contain exactly one output_text item")
+            text = texts[0]
+            continuation = None
+            first_token_ms = latency_ms
+        model = value.get("model")
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("response model must be a string")
+        return ConversationResult(
+            usage=_parse_conversation_usage(value.get("usage")),
+            latency_ms=latency_ms,
+            provider="openai",
+            model=model,
+            text=text,
+            tool_calls=tuple(calls),
+            time_to_first_token_ms=first_token_ms,
+            continuation=continuation,
+        )
+
+
+def _conversation_tool(spec) -> dict[str, Any]:
+    parameters = json.loads(json.dumps(spec.argument_schema))
+    properties = parameters.get("properties")
+    if not isinstance(properties, dict):
+        raise ValueError("tool argument schema requires object properties")
+    parameters["required"] = sorted(properties)
+    parameters["additionalProperties"] = False
+    return {
+        "type": "function",
+        "name": spec.name,
+        "description": spec.description,
+        "parameters": parameters,
+        "strict": True,
+    }
+
+
+def _parse_conversation_usage(value: object) -> ConversationUsage:
+    if not isinstance(value, Mapping):
+        raise ValueError("response usage must be an object")
+    values: dict[str, int] = {}
+    for name in ("input_tokens", "output_tokens", "total_tokens"):
+        count = value.get(name)
+        if type(count) is not int:
+            raise ValueError(f"usage {name} must be an integer")
+        values[name] = count
+    return ConversationUsage(**values)
 
 
 class OpenAIPlanningProvider:

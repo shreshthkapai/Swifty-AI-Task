@@ -20,6 +20,7 @@ from .tool_gate import SemanticCommandSpec
 
 CONVERSATION_REQUEST_SCHEMA_VERSION = 1
 MAX_TOOL_CALLS = 4
+MAX_CONTINUATION_CHARS = 262_144
 
 
 def _frozen_object(value: FrozenObject | Mapping[str, Any], field_name: str) -> FrozenObject:
@@ -84,6 +85,7 @@ class ConversationToolResult:
 class ToolExchange:
     calls: tuple[ConversationToolCall, ...]
     results: tuple[ConversationToolResult, ...]
+    continuation: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.calls, tuple) or not self.calls:
@@ -103,6 +105,13 @@ class ToolExchange:
             raise ValueError("tool call IDs must be unique")
         if result_pairs != call_pairs:
             raise ValueError("tool results must match calls in order by ID and name")
+        if self.continuation is not None:
+            if not isinstance(self.continuation, str) or not self.continuation.strip():
+                raise ValueError("continuation must be a non-empty opaque string or None")
+            if len(self.continuation) > MAX_CONTINUATION_CHARS:
+                raise ValueError(
+                    f"continuation cannot exceed {MAX_CONTINUATION_CHARS} characters"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +175,7 @@ class ConversationResult:
     text: str | None = None
     tool_calls: tuple[ConversationToolCall, ...] = ()
     time_to_first_token_ms: float | None = None
+    continuation: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.usage, ConversationUsage):
@@ -192,6 +202,15 @@ class ConversationResult:
             raise ValueError("tool call IDs must be unique")
         if (self.text is None) == (not self.tool_calls):
             raise ValueError("result must contain either text or tool calls, but not both")
+        if self.continuation is not None:
+            if not isinstance(self.continuation, str) or not self.continuation.strip():
+                raise ValueError("continuation must be a non-empty opaque string or None")
+            if len(self.continuation) > MAX_CONTINUATION_CHARS:
+                raise ValueError(
+                    f"continuation cannot exceed {MAX_CONTINUATION_CHARS} characters"
+                )
+        if self.text is not None and self.continuation is not None:
+            raise ValueError("text results cannot expose continuation state")
         if self.time_to_first_token_ms is not None:
             if (
                 isinstance(self.time_to_first_token_ms, bool)
