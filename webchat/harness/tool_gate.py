@@ -30,6 +30,7 @@ CommandName = ReadCommandName | PreparationCommandName
 class CommandKind(StrEnum):
     READ = "read"
     PREPARATION = "preparation"
+    CONTROL = "control"
 
 
 class InclusionReason(StrEnum):
