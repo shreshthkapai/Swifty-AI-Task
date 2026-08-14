@@ -17,7 +17,7 @@ from webchat.harness.conversation import (
     ConversationUsage,
 )
 from webchat.harness.conversation_runtime import ConversationRuntime
-from webchat.harness.planning import TurnRequest
+from webchat.harness.turn import TurnRequest
 from webchat.harness.state import (
     ActionReference,
     ConversationState,
@@ -28,7 +28,7 @@ from webchat.harness.state import (
 )
 from webchat.providers.base import ConversationProviderError, ProviderErrorKind
 
-from tests.webchat.harness.test_runtime import (
+from tests.webchat.harness.support import (
     NOW,
     availability,
     dealer,

@@ -17,13 +17,12 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from webchat.domain.errors import DealerError
-from webchat.harness.planning import PlanValidationError, TurnRequest
-from webchat.harness.runtime import TurnResult
+from webchat.harness.turn import TurnRequest, TurnResult
 from webchat.persistence import (
     PersistenceError,
     RevisionConflictError,
 )
-from webchat.providers.base import PlanningProviderError
+from webchat.providers.base import ConversationProviderError
 
 from .config import AppConfig
 from .contracts import (
@@ -144,27 +143,15 @@ class ChatHttpApplication:
                     error_kind=exc.code,
                     status_code=exc.status_code,
                 )
-            except PlanningProviderError:
+            except ConversationProviderError:
                 response = _error_response(
                     503,
-                    "planner_unavailable",
+                    "assistant_unavailable",
                     "The assistant is temporarily unavailable. Please try again.",
                     request_id,
                 )
                 self._log_turn_error(
-                    started, "planner_unavailable", 503,
-                    request_id=request_id, conversation_id=conversation_id,
-                    turn_id=turn_id,
-                )
-            except PlanValidationError:
-                response = _error_response(
-                    503,
-                    "planner_unavailable",
-                    "The assistant is temporarily unavailable. Please try again.",
-                    request_id,
-                )
-                self._log_turn_error(
-                    started, "invalid_plan", 503,
+                    started, "assistant_unavailable", 503,
                     request_id=request_id, conversation_id=conversation_id,
                     turn_id=turn_id,
                 )

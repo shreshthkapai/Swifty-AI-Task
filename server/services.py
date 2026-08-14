@@ -17,8 +17,7 @@ from webchat.adapters.northstar.adapter import (
 )
 from webchat.adapters.northstar.validation import customer_phone_is_valid
 from webchat.harness.policy import PolicyEngine
-from webchat.harness.planning import TurnRequest
-from webchat.harness.runtime import TurnResult
+from webchat.harness.turn import TurnRequest, TurnResult
 from webchat.harness.conversation_runtime import ConversationRuntime
 from webchat.persistence import ConversationStore, SQLiteConversationStore
 from webchat.providers.openai import (

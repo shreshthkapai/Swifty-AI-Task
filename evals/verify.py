@@ -25,8 +25,7 @@ from evals.reporting import detailed_report_data, write_report_atomic
 from evals.run import DetailedEvaluationReport, LaneKind, run_detailed_evaluation
 from evals.schema import Corpus, load_corpus
 from webchat.providers.openai import (
-    OpenAIGroundedResponseProvider,
-    OpenAIPlanningProvider,
+    OpenAIConversationProvider,
     OpenAIProviderConfig,
 )
 
@@ -376,35 +375,20 @@ async def _run_corpus(corpus: Corpus, lane: LaneKind) -> DetailedEvaluationRepor
 
     values = _local_environment()
     api_key = values.get("OPENAI_API_KEY", "").strip()
-    response_model = values.get("CHAT_MODEL", "").strip()
-    planner_model = values.get("CHAT_PLANNER_MODEL", response_model).strip()
-    if not api_key or not response_model or not planner_model:
+    model = values.get("CHAT_MODEL", "").strip()
+    if not api_key or not model:
         raise ValueError(
             "live-provider lane requires OPENAI_API_KEY and CHAT_MODEL in the environment or .env"
         )
     async with httpx.AsyncClient() as client:
-        planning_provider_config = OpenAIProviderConfig(
+        provider_config = OpenAIProviderConfig(
             api_key=api_key,
-            model=planner_model,
+            model=model,
             base_url=values.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
             timeout_seconds=float(values.get("CHAT_PROVIDER_TIMEOUT_SECONDS", "30")),
         )
-        response_provider_config = OpenAIProviderConfig(
-            api_key=api_key,
-            model=response_model,
-            base_url=values.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-            timeout_seconds=float(values.get("CHAT_PROVIDER_TIMEOUT_SECONDS", "30")),
-        )
-        provider = OpenAIPlanningProvider(client, planning_provider_config)
-        grounded_response = OpenAIGroundedResponseProvider(
-            client,
-            response_provider_config,
-        )
-        driver = ProviderConversationDriver(
-            registry,
-            lambda: provider,
-            lambda: grounded_response,
-        )
+        provider = OpenAIConversationProvider(client, provider_config)
+        driver = ProviderConversationDriver(registry, lambda: provider)
         return await run_detailed_evaluation(corpus, driver, lane=lane)
 
 

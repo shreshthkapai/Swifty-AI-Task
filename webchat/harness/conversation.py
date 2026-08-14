@@ -15,7 +15,7 @@ from .contracts import (
     thaw_json_object,
     validate_frozen_json_object,
 )
-from .tool_gate import SemanticCommandSpec
+from .tools import SemanticCommandSpec
 
 
 CONVERSATION_REQUEST_SCHEMA_VERSION = 1

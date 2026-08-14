@@ -8,7 +8,7 @@ from server.app import ChatServices
 from server.config import AppConfig
 from webchat.adapters.northstar import NorthstarConfig
 from webchat.harness.render import DeclarativeRenderer
-from webchat.harness.runtime import TurnResult
+from webchat.harness.turn import TurnResult
 from webchat.persistence import SQLiteConversationStore
 
 

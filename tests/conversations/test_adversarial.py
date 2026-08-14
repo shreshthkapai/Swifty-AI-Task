@@ -4,12 +4,12 @@ from tests.conversations.support import corpus
 
 
 class AdversarialCorpusTests(unittest.TestCase):
-    def test_obvious_trivia_is_zero_call_but_mixed_request_is_retained(self) -> None:
+    def test_obvious_trivia_uses_no_dealer_tools_but_mixed_request_is_retained(self) -> None:
         by_id = {scenario.id: scenario for scenario in corpus().scenarios}
 
         for scenario_id in ("scope-01", "scope-02"):
             turn = by_id[scenario_id].turns[0]
-            self.assertEqual(turn.expectation.max_model_calls, 0)
+            self.assertEqual(turn.expectation.max_model_calls, 1)
             self.assertEqual(turn.expectation.prohibited_calls, ("*",))
             self.assertIsNone(turn.scripted_plan)
 

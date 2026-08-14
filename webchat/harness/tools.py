@@ -1,17 +1,10 @@
-"""Semantic command catalogue and policy-driven planner visibility."""
+"""Provider-neutral semantic dealership tool catalogue."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from enum import StrEnum
-import json
-import re
-from typing import Any, Iterable
-
-from webchat.domain.common import require_aware
-
-from .actions import PendingActionState
+from typing import Any
 from .contracts import (
     FrozenObject,
     PreparationCommandName,
@@ -19,11 +12,9 @@ from .contracts import (
     freeze_json_object,
     thaw_json_object,
 )
-from .state import ConversationState, WorkflowDomain
-from .signals import DOMAIN_SIGNALS
+from .state import WorkflowDomain
 
 
-TOOL_GATE_POLICY_VERSION = 2
 CommandName = ReadCommandName | PreparationCommandName
 
 
@@ -31,18 +22,6 @@ class CommandKind(StrEnum):
     READ = "read"
     PREPARATION = "preparation"
     CONTROL = "control"
-
-
-class InclusionReason(StrEnum):
-    NO_ACTIVE_WORKFLOW = "no_active_workflow"
-    CURRENT_DOMAIN = "current_domain"
-    SAFE_CROSS_DOMAIN_ENTRY = "safe_cross_domain_entry"
-    EXPLICIT_DOMAIN_SIGNAL = "explicit_domain_signal"
-
-
-class ExclusionReason(StrEnum):
-    UNRELATED_DOMAIN = "unrelated_domain"
-    PENDING_ACTION_COMPETITION = "pending_action_competition"
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,15 +245,7 @@ _CATALOGUE = (
 )
 
 _SPEC_BY_NAME = {spec.name: spec for spec in _CATALOGUE}
-_SAFE_ENTRY_READS = {
-    ReadCommandName.SEARCH_VEHICLES.value,
-    ReadCommandName.LIST_NEW_CAR_OFFERS.value,
-    ReadCommandName.LIST_WORKSHOP_SERVICES.value,
-    ReadCommandName.LIST_WORKSHOP_LOCATIONS.value,
-    ReadCommandName.FIND_WORKSHOP_SLOTS.value,
-    ReadCommandName.LIST_DEALERSHIPS.value,
-    ReadCommandName.GET_BUSINESS_INFORMATION.value,
-}
+
 def command_catalogue() -> tuple[SemanticCommandSpec, ...]:
     return _CATALOGUE
 
@@ -285,163 +256,3 @@ def command_spec(name: str) -> SemanticCommandSpec:
     except KeyError as exc:
         raise ValueError(f"unknown semantic command: {name}") from exc
 
-
-@dataclass(frozen=True, slots=True)
-class IncludedCommand:
-    name: str
-    reason: InclusionReason
-
-    def to_dict(self) -> dict[str, str]:
-        return {"name": self.name, "reason": self.reason.value}
-
-
-@dataclass(frozen=True, slots=True)
-class ExcludedCommand:
-    name: str
-    reason: ExclusionReason
-
-    def to_dict(self) -> dict[str, str]:
-        return {"name": self.name, "reason": self.reason.value}
-
-
-@dataclass(frozen=True, slots=True)
-class ToolSelection:
-    included: tuple[IncludedCommand, ...]
-    excluded: tuple[ExcludedCommand, ...]
-    action_controls: tuple[str, ...] = ()
-    policy_version: int = TOOL_GATE_POLICY_VERSION
-
-    def __post_init__(self) -> None:
-        names = [item.name for item in self.included] + [item.name for item in self.excluded]
-        if len(names) != len(set(names)) or set(names) != set(_SPEC_BY_NAME):
-            raise ValueError("tool selection must account for every command exactly once")
-
-    @property
-    def included_names(self) -> tuple[str, ...]:
-        return tuple(item.name for item in self.included)
-
-    @property
-    def specifications(self) -> tuple[SemanticCommandSpec, ...]:
-        return tuple(_SPEC_BY_NAME[name] for name in self.included_names)
-
-    def reason_for(self, name: str) -> InclusionReason | ExclusionReason:
-        for item in (*self.included, *self.excluded):
-            if item.name == name:
-                return item.reason
-        raise KeyError(name)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "tool_gate_policy_version": self.policy_version,
-            "included": [item.to_dict() for item in self.included],
-            "excluded": [item.to_dict() for item in self.excluded],
-            "action_controls": list(self.action_controls),
-        }
-
-    def to_json(self) -> str:
-        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
-
-
-class ToolGate:
-    """Select planner-visible commands without granting execution authority."""
-
-    def select(
-        self,
-        *,
-        state: ConversationState,
-        current_input: str,
-        now: datetime,
-    ) -> ToolSelection:
-        if not isinstance(state, ConversationState):
-            raise ValueError("state must be a ConversationState")
-        if not isinstance(current_input, str):
-            raise ValueError("current_input must be a string")
-        require_aware(now, "now")
-        active_domain = state.workflow.domain
-        signalled_domains = {
-            domain
-            for domain, pattern in DOMAIN_SIGNALS.items()
-            if pattern.search(current_input.casefold())
-        }
-        pending = state.pending_action
-        pending_is_live = (
-            pending is not None
-            and not pending.is_expired(now)
-            and pending.state
-            in {
-                PendingActionState.AWAITING_CONFIRMATION,
-                PendingActionState.CONFIRMED,
-                PendingActionState.EXECUTING,
-                PendingActionState.FAILED,
-            }
-        )
-        normalized_input = current_input.casefold()
-        test_drive_without_interest = (
-            bool(DOMAIN_SIGNALS[WorkflowDomain.TEST_DRIVE].search(normalized_input))
-            and not re.search(r"\b(register|registration|interest)\b", normalized_input)
-        )
-
-        included: list[IncludedCommand] = []
-        excluded: list[ExcludedCommand] = []
-        for spec in _CATALOGUE:
-            if pending_is_live and spec.kind is CommandKind.PREPARATION:
-                excluded.append(
-                    ExcludedCommand(spec.name, ExclusionReason.PENDING_ACTION_COMPETITION)
-                )
-                continue
-            if (
-                test_drive_without_interest
-                and spec.name
-                == PreparationCommandName.PREPARE_VEHICLE_INTEREST.value
-            ):
-                excluded.append(
-                    ExcludedCommand(spec.name, ExclusionReason.UNRELATED_DOMAIN)
-                )
-                continue
-            reason = self._inclusion_reason(
-                spec,
-                active_domain=active_domain,
-                signalled_domains=signalled_domains,
-            )
-            if reason is None:
-                excluded.append(ExcludedCommand(spec.name, ExclusionReason.UNRELATED_DOMAIN))
-            else:
-                included.append(IncludedCommand(spec.name, reason))
-
-        controls: tuple[str, ...] = ()
-        if pending_is_live:
-            if pending.state is PendingActionState.AWAITING_CONFIRMATION:
-                controls = ("cancel_pending_action", "confirm_pending_action")
-            elif pending.state is PendingActionState.FAILED:
-                controls = ("cancel_pending_action", "retry_failed_action")
-            elif pending.state is PendingActionState.CONFIRMED:
-                controls = ("cancel_pending_action",)
-        return ToolSelection(
-            included=tuple(sorted(included, key=lambda item: item.name)),
-            excluded=tuple(sorted(excluded, key=lambda item: item.name)),
-            action_controls=controls,
-        )
-
-    @staticmethod
-    def _inclusion_reason(
-        spec: SemanticCommandSpec,
-        *,
-        active_domain: WorkflowDomain,
-        signalled_domains: Iterable[WorkflowDomain],
-    ) -> InclusionReason | None:
-        if active_domain is WorkflowDomain.NONE:
-            signalled_domains = tuple(signalled_domains)
-            if not signalled_domains:
-                return InclusionReason.NO_ACTIVE_WORKFLOW
-            if any(domain in spec.domains for domain in signalled_domains):
-                return InclusionReason.EXPLICIT_DOMAIN_SIGNAL
-            if spec.name in _SAFE_ENTRY_READS:
-                return InclusionReason.SAFE_CROSS_DOMAIN_ENTRY
-            return None
-        if active_domain in spec.domains:
-            return InclusionReason.CURRENT_DOMAIN
-        if any(domain in spec.domains for domain in signalled_domains):
-            return InclusionReason.EXPLICIT_DOMAIN_SIGNAL
-        if spec.name in _SAFE_ENTRY_READS:
-            return InclusionReason.SAFE_CROSS_DOMAIN_ENTRY
-        return None

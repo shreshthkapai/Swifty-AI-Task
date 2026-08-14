@@ -33,10 +33,10 @@ from .contracts import (
     PreparationCommand,
     ReadCommand,
 )
-from .planning import TurnRequest
+from .execution import CommandExecutor
 from .policy import PolicyEngine
 from .render import DeclarativeRenderer
-from .runtime import HarnessRuntime, TurnResult, _state_for_turn
+from .turn import TurnRequest, TurnResult, state_for_turn
 from .state import (
     ConversationState,
     EntityContext,
@@ -55,7 +55,7 @@ def _random_id() -> str:
     return secrets.token_urlsafe(18)
 
 
-class ConversationRuntime(HarnessRuntime):
+class ConversationRuntime(CommandExecutor):
     """Let one model own language while deterministic code owns execution safety."""
 
     def __init__(
@@ -69,11 +69,15 @@ class ConversationRuntime(HarnessRuntime):
     ) -> None:
         if not isinstance(conversation, ConversationProvider):
             raise ValueError("conversation must implement ConversationProvider")
-        self._dealer = dealer
         self._conversation = conversation
-        self._id_factory = id_factory
-        self._policy = policy or PolicyEngine()
-        self._renderer = renderer or DeclarativeRenderer(id_factory=id_factory)
+        selected_policy = policy or PolicyEngine()
+        selected_renderer = renderer or DeclarativeRenderer(id_factory=id_factory)
+        super().__init__(
+            dealer=dealer,
+            id_factory=id_factory,
+            policy=selected_policy,
+            renderer=selected_renderer,
+        )
 
     async def handle(
         self,
@@ -81,10 +85,10 @@ class ConversationRuntime(HarnessRuntime):
         *,
         on_text_delta: TextDeltaCallback | None = None,
     ) -> TurnResult:
-        turn_state = _state_for_turn(request)
+        turn_state = state_for_turn(request)
         turn_request = replace(request, state=turn_state)
         if request.action_reference is not None:
-            outcome = await self._execute_ui_action(
+            outcome = await self.execute_ui_action(
                 request.action_reference,
                 request=turn_request,
             )
@@ -126,7 +130,7 @@ class ConversationRuntime(HarnessRuntime):
             command for command in commands if not isinstance(command, ConversationControl)
         )
         execution_base = (
-            self._supersede_for_switch(turn_state, dealer_commands)
+            self.supersede_for_switch(turn_state, dealer_commands)
             if dealer_commands
             else turn_state
         )
@@ -256,7 +260,7 @@ class ConversationRuntime(HarnessRuntime):
         results = tuple(item for item in (first, second) if item is not None)
         return TurnResult(
             state=state,
-            blocks=(self._provider_recovery(),) + blocks,
+            blocks=(self.provider_recovery(),) + blocks,
             model_calls=calls,
             input_tokens=sum(item.usage.input_tokens for item in results),
             output_tokens=sum(item.usage.output_tokens for item in results),
@@ -274,7 +278,7 @@ class ConversationRuntime(HarnessRuntime):
         try:
             if isinstance(command, ConversationControl):
                 return await self._execute_control(command, state=state, now=now), False
-            return await self._execute_command(command, state=state, now=now), False
+            return await self.execute_command(command, state=state, now=now), False
         except DealerError as exc:
             return (
                 dealer_recovery(state, exc.failure, renderer=self._renderer),
@@ -302,13 +306,13 @@ class ConversationRuntime(HarnessRuntime):
         now,
     ) -> CommandOutcome:
         if control.name is ConversationControlName.CONFIRM_PENDING_ACTION:
-            return await self._confirm(state, now=now)
+            return await self.confirm(state, now=now)
         if control.name is ConversationControlName.CANCEL_PENDING_ACTION:
-            return self._cancel(state)
+            return self.cancel(state)
         if control.name is ConversationControlName.RETRY_PENDING_ACTION:
-            return await self._retry(state, now=now)
+            return await self.retry(state, now=now)
         if control.name is ConversationControlName.SHOW_MORE_RESULTS:
-            return await self._show_more(state, now=now)
+            return await self.show_more(state, now=now)
         if control.name is ConversationControlName.START_OVER:
             return CommandOutcome(
                 replace(
@@ -333,7 +337,7 @@ class ConversationRuntime(HarnessRuntime):
                         ),
                     ),
                 )
-            return await self._select_presented(state, ordinal, now=now)
+            return await self.select_presented(state, ordinal, now=now)
         raise ValueError(f"unsupported conversation control: {control.name.value}")
 
 

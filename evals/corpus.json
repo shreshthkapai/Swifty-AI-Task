@@ -51,7 +51,7 @@
       "initial": {"state_fixture": "empty", "page": {"path": "/"}}, "dealer_fixture": "seeded",
       "turns": [{"id": "t1", "input": {"kind": "message", "value": "Find me a car under £30,000, but it must cost at least £50,000"},
         "scripted_plan": {"schema_version": 2, "scope": "in_domain", "commands": [], "response_strategy": "missing_information", "response_mode": "clarification", "clarification_question": "Should I use £30,000 as the maximum, or £50,000 as the minimum?"},
-        "expect": {"prohibited_calls": ["search_vehicles"], "max_model_calls": 2, "answer": {"strategies": ["missing_information"], "required_block_types": ["notice"], "required_next_steps": ["clarify_price_direction"], "forbidden_claims": ["assumed_budget"], "direct": true}}}]
+        "expect": {"prohibited_calls": ["search_vehicles"], "max_model_calls": 2, "answer": {"strategies": ["missing_information"], "required_block_types": ["text"], "required_next_steps": ["clarify_price_direction"], "forbidden_claims": ["assumed_budget"], "direct": true}}}]
     },
     {
       "id": "vehicle-08", "category": "vehicle_discovery", "title": "No matching stock recovery", "tags": ["no-results"],
@@ -314,7 +314,7 @@
       "initial": {"state_fixture": "customer_known", "page": {}}, "dealer_fixture": "vehicle_test_drive_sequence",
       "turns": [
         {"id": "t1", "input": {"kind": "message", "value": "Show me automatic BMWs under £40k"}, "scripted_plan": {"schema_version": 2, "scope": "in_domain", "commands": [{"name": "search_vehicles", "arguments": {"make": "BMW", "transmission": "Automatic", "max_price_minor": 4000000}}], "response_strategy": "search_results", "response_mode": "grounded_answer"}, "expect": {"required_commands": ["search_vehicles"], "max_model_calls": 2, "answer": {"strategies": ["search_results"], "required_block_types": ["vehicle_cards"], "required_next_steps": ["select_vehicle"], "direct": true}}},
-        {"id": "t2", "input": {"kind": "message", "value": "the second one"}, "scripted_plan": null, "expect": {"prohibited_calls": ["planning_provider"], "expected_state": {"selected_vehicle": "veh-002"}, "max_model_calls": 0, "answer": {"strategies": ["vehicle_details"], "required_block_types": ["vehicle_cards"], "required_facts": ["selected_second_presented_vehicle"], "direct": true}}},
+        {"id": "t2", "input": {"kind": "message", "value": "the second one"}, "scripted_plan": null, "expect": {"expected_state": {"selected_vehicle": "veh-002"}, "max_model_calls": 2, "answer": {"strategies": ["vehicle_details"], "required_block_types": ["vehicle_cards"], "required_facts": ["selected_second_presented_vehicle"], "direct": true}}},
         {"id": "t3", "input": {"kind": "message", "value": "Actually cheaper"}, "scripted_plan": {"schema_version": 2, "scope": "in_domain", "commands": [{"name": "search_vehicles", "arguments": {"refinement": "cheaper_than_selected"}}], "response_strategy": "search_results", "response_mode": "grounded_answer"}, "expect": {"required_commands": ["search_vehicles"], "max_model_calls": 2, "answer": {"strategies": ["search_results"], "required_block_types": ["vehicle_cards"], "required_facts": ["lower_than_selected_price"], "direct": true}}},
         {"id": "t4", "input": {"kind": "message", "value": "Can I test drive it Saturday?"}, "scripted_plan": {"schema_version": 2, "scope": "in_domain", "commands": [{"name": "find_test_drive_slots", "arguments": {"date_from": "2026-08-15", "date_to": "2026-08-15"}}], "response_strategy": "slot_results", "response_mode": "grounded_answer"}, "expect": {"required_commands": ["find_test_drive_slots"], "required_calls": ["get_vehicle_availability", "list_test_drive_slots"], "max_model_calls": 2, "answer": {"strategies": ["slot_results"], "required_block_types": ["slot_choices"], "required_next_steps": ["select_slot"], "direct": true}}},
         {"id": "t5", "input": {"kind": "action", "value": "select", "reference": "presented-slot:2"}, "scripted_plan": null, "expect": {"expected_state": {"selected_slot": "slot-2", "pending_action": "test_drive_booking"}, "max_model_calls": 0, "answer": {"strategies": ["action_prepared"], "required_block_types": ["confirmation"], "required_next_steps": ["confirm_or_cancel"], "direct": true}}},
@@ -350,12 +350,12 @@
     {
       "id": "scope-01", "category": "scope_resilience", "title": "Moon trivia redirects deterministically", "tags": ["out-of-scope", "zero-model"],
       "initial": {"state_fixture": "empty", "page": {}}, "dealer_fixture": "seeded",
-      "turns": [{"id": "t1", "input": {"kind": "message", "value": "What size is the moon?"}, "scripted_plan": null, "expect": {"prohibited_calls": ["*"], "max_model_calls": 0, "answer": {"strategies": ["domain_redirect"], "exact_text": "I can help with vehicles, test drives, sales, servicing, and dealership information.", "forbidden_claims": ["moon_size"], "direct": true}}}]
+      "turns": [{"id": "t1", "input": {"kind": "message", "value": "What size is the moon?"}, "scripted_plan": null, "expect": {"prohibited_calls": ["*"], "max_model_calls": 1, "answer": {"strategies": ["domain_redirect"], "exact_text": "I can help with vehicles, test drives, sales, servicing, and dealership information.", "forbidden_claims": ["moon_size"], "direct": true}}}]
     },
     {
       "id": "scope-02", "category": "scope_resilience", "title": "World Cup trivia redirects deterministically", "tags": ["out-of-scope", "zero-model"],
       "initial": {"state_fixture": "empty", "page": {}}, "dealer_fixture": "seeded",
-      "turns": [{"id": "t1", "input": {"kind": "message", "value": "Who won the World Cup?"}, "scripted_plan": null, "expect": {"prohibited_calls": ["*"], "max_model_calls": 0, "answer": {"strategies": ["domain_redirect"], "exact_text": "I can help with vehicles, test drives, sales, servicing, and dealership information.", "forbidden_claims": ["world_cup_winner"], "direct": true}}}]
+      "turns": [{"id": "t1", "input": {"kind": "message", "value": "Who won the World Cup?"}, "scripted_plan": null, "expect": {"prohibited_calls": ["*"], "max_model_calls": 1, "answer": {"strategies": ["domain_redirect"], "exact_text": "I can help with vehicles, test drives, sales, servicing, and dealership information.", "forbidden_claims": ["world_cup_winner"], "direct": true}}}]
     },
     {
       "id": "scope-03", "category": "scope_resilience", "title": "Family SUV advice is dealership-adjacent", "tags": ["adjacent"],

@@ -91,13 +91,13 @@ class CorpusContractTests(unittest.TestCase):
         }
 
         moon = turns["What size is the moon?"]
-        self.assertEqual(moon.expectation.max_model_calls, 0)
+        self.assertEqual(moon.expectation.max_model_calls, 1)
         self.assertEqual(moon.expectation.prohibited_calls, ("*",))
         self.assertEqual(
             moon.expectation.answer.strategies, ("domain_redirect",)
         )
         world_cup = turns["Who won the World Cup?"]
-        self.assertEqual(world_cup.expectation.max_model_calls, 0)
+        self.assertEqual(world_cup.expectation.max_model_calls, 1)
         self.assertEqual(world_cup.expectation.prohibited_calls, ("*",))
         family = turns["Is an SUV good for a family of five?"]
         self.assertEqual(
@@ -120,7 +120,7 @@ class CorpusContractTests(unittest.TestCase):
 
         for scenario in corpus.scenarios:
             for turn in scenario.turns:
-                if turn.expectation.max_model_calls > 0:
+                if turn.expectation.required_commands:
                     self.assertIsNotNone(turn.scripted_plan, f"{scenario.id}/{turn.id}")
                     self.assertLessEqual(len(turn.scripted_plan.commands), 2)
 

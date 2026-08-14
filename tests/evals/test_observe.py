@@ -10,13 +10,14 @@ from evals.observe import (
     observe_turn,
 )
 from evals.schema import load_corpus
-from webchat.harness.contracts import ReadCommand, ReadCommandName, ResponseStrategy
+from evals.schema import ResponseStrategy
+from webchat.harness.contracts import ReadCommand, ReadCommandName
 from webchat.harness.evidence import (
     EvidenceAuthority,
     EvidenceFreshness,
     EvidenceItem,
 )
-from webchat.harness.runtime import TurnResult
+from webchat.harness.turn import TurnResult
 from webchat.harness.state import ConversationState, MessageBlock
 
 
@@ -37,7 +38,7 @@ class ObservationTests(unittest.TestCase):
             before_dealer=DealerSnapshot((), ()),
             after_dealer=DealerSnapshot((), ()),
             commands=(),
-            planning_strategy=ResponseStrategy.RECOVERY,
+            response_strategy=ResponseStrategy.RECOVERY,
         )
 
         self.assertIn("zero_results", observed.answer.facts)
@@ -70,7 +71,7 @@ class ObservationTests(unittest.TestCase):
                 ReadCommandName.SEARCH_VEHICLES,
                 {"body_style": "SUV"},
             ),),
-            planning_strategy=ResponseStrategy.SEARCH_RESULTS,
+            response_strategy=ResponseStrategy.SEARCH_RESULTS,
         )
 
         self.assertIn("zero_results", observed.answer.facts)
@@ -92,7 +93,7 @@ class ObservationTests(unittest.TestCase):
             before_dealer=DealerSnapshot((), ()),
             after_dealer=DealerSnapshot((), ()),
             commands=(),
-            planning_strategy=ResponseStrategy.MISSING_INFORMATION,
+            response_strategy=ResponseStrategy.MISSING_INFORMATION,
         )
 
         self.assertIn("clarify_price_direction", observed.answer.next_steps)
@@ -117,7 +118,7 @@ class ObservationTests(unittest.TestCase):
             before_dealer=DealerSnapshot((), ()),
             after_dealer=DealerSnapshot((), ()),
             commands=(),
-            planning_strategy=ResponseStrategy.MISSING_INFORMATION,
+            response_strategy=ResponseStrategy.MISSING_INFORMATION,
         )
 
         self.assertIn("clarify_price_direction", observed.answer.next_steps)
@@ -142,7 +143,7 @@ class ObservationTests(unittest.TestCase):
             before_dealer=DealerSnapshot((), ()),
             after_dealer=DealerSnapshot((), ()),
             commands=(),
-            planning_strategy=ResponseStrategy.SLOT_RESULTS,
+            response_strategy=ResponseStrategy.SLOT_RESULTS,
         )
 
         self.assertEqual(observed.answer.block_types, ("notice", "slot_choices"))
@@ -171,7 +172,7 @@ class ObservationTests(unittest.TestCase):
             before_dealer=DealerSnapshot((), ()),
             after_dealer=DealerSnapshot((), ()),
             commands=(),
-            planning_strategy=ResponseStrategy.SEARCH_RESULTS,
+            response_strategy=ResponseStrategy.SEARCH_RESULTS,
             current_input="Show me a family car",
         )
 
@@ -195,7 +196,7 @@ class ObservationTests(unittest.TestCase):
             before_dealer=DealerSnapshot((), ()),
             after_dealer=DealerSnapshot((), ()),
             commands=(),
-            planning_strategy=ResponseStrategy.GENERAL_GUIDANCE,
+            response_strategy=ResponseStrategy.GENERAL_GUIDANCE,
         )
 
         self.assertIn("family_vehicle_considerations", observed.answer.facts)
@@ -219,7 +220,7 @@ class ObservationTests(unittest.TestCase):
             before_dealer=DealerSnapshot((), ()),
             after_dealer=DealerSnapshot((), ()),
             commands=(),
-            planning_strategy=ResponseStrategy.GENERAL_GUIDANCE,
+            response_strategy=ResponseStrategy.GENERAL_GUIDANCE,
             current_input="Is an SUV good for a family of five?",
         )
 
@@ -244,7 +245,7 @@ class ObservationTests(unittest.TestCase):
             before_dealer=DealerSnapshot((), ()),
             after_dealer=DealerSnapshot((), ()),
             commands=(),
-            planning_strategy=ResponseStrategy.GENERAL_GUIDANCE,
+            response_strategy=ResponseStrategy.GENERAL_GUIDANCE,
         )
 
         self.assertIn("family_vehicle_considerations", observed.answer.facts)

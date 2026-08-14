@@ -12,16 +12,10 @@ import time
 from typing import Any
 
 from webchat.domain.errors import DealerError
-from webchat.harness.grounded_response import GroundedResponseRequest
 from webchat.harness.conversation import ConversationRequest, ConversationResult
 from webchat.providers.base import (
     ConversationProviderError,
     TextDeltaCallback,
-    GroundedResponseProviderError,
-    GroundedResponseResult,
-    PlanningProviderError,
-    PlanningRequest,
-    PlanningResult,
 )
 
 
@@ -116,59 +110,6 @@ class JsonEventLogger:
         )
 
 
-class ObservedPlanningProvider:
-    """Log one metadata-only event around each provider planning call."""
-
-    def __init__(
-        self,
-        provider: Any,
-        *,
-        logger: JsonEventLogger,
-        monotonic: Callable[[], float] = time.perf_counter,
-    ) -> None:
-        self._provider = provider
-        self._logger = logger
-        self._monotonic = monotonic
-
-    async def plan(self, request: PlanningRequest) -> PlanningResult:
-        started = self._monotonic()
-        try:
-            result = await self._provider.plan(request)
-        except PlanningProviderError as exc:
-            self._logger.emit(
-                "external_call",
-                operation="plan",
-                duration_ms=(self._monotonic() - started) * 1_000,
-                retries=0,
-                outcome="error",
-                error_kind=exc.kind.value,
-                status_code=exc.status_code,
-            )
-            raise
-        except Exception:
-            self._logger.emit(
-                "external_call",
-                operation="plan",
-                duration_ms=(self._monotonic() - started) * 1_000,
-                retries=0,
-                outcome="error",
-                error_kind="unexpected_error",
-            )
-            raise
-        self._logger.emit(
-            "external_call",
-            operation="plan",
-            duration_ms=(self._monotonic() - started) * 1_000,
-            retries=0,
-            input_tokens=result.usage.input_tokens,
-            output_tokens=result.usage.output_tokens,
-            provider=result.provider,
-            model=result.model,
-            outcome="ok",
-        )
-        return result
-
-
 class ObservedConversationProvider:
     """Log metadata around conversation calls without recording customer content."""
 
@@ -219,61 +160,6 @@ class ObservedConversationProvider:
         self._logger.emit(
             "external_call",
             operation="conversation",
-            duration_ms=(self._monotonic() - started) * 1_000,
-            retries=0,
-            input_tokens=result.usage.input_tokens,
-            output_tokens=result.usage.output_tokens,
-            provider=result.provider,
-            model=result.model,
-            outcome="ok",
-        )
-        return result
-
-
-class ObservedGroundedResponseProvider:
-    """Log metadata around response synthesis without logging questions or evidence."""
-
-    def __init__(
-        self,
-        provider: Any,
-        *,
-        logger: JsonEventLogger,
-        monotonic: Callable[[], float] = time.perf_counter,
-    ) -> None:
-        self._provider = provider
-        self._logger = logger
-        self._monotonic = monotonic
-
-    async def respond(
-        self,
-        request: GroundedResponseRequest,
-    ) -> GroundedResponseResult:
-        started = self._monotonic()
-        try:
-            result = await self._provider.respond(request)
-        except GroundedResponseProviderError as exc:
-            self._logger.emit(
-                "external_call",
-                operation="grounded_response",
-                duration_ms=(self._monotonic() - started) * 1_000,
-                retries=0,
-                outcome="error",
-                error_kind=exc.kind.value,
-            )
-            raise
-        except Exception:
-            self._logger.emit(
-                "external_call",
-                operation="grounded_response",
-                duration_ms=(self._monotonic() - started) * 1_000,
-                retries=0,
-                outcome="error",
-                error_kind="unexpected_error",
-            )
-            raise
-        self._logger.emit(
-            "external_call",
-            operation="grounded_response",
             duration_ms=(self._monotonic() - started) * 1_000,
             retries=0,
             input_tokens=result.usage.input_tokens,

@@ -10,7 +10,7 @@ from starlette.testclient import TestClient
 from server.app import create_app
 from server.observability import JsonEventLogger
 from webchat.domain.errors import DealerError, DealerErrorKind, DealerFailure
-from webchat.providers.base import PlanningProviderError, ProviderErrorKind
+from webchat.providers.base import ConversationProviderError, ProviderErrorKind
 
 from .support import NOW, FakeRuntime, app_config, services
 
@@ -256,8 +256,8 @@ class ChatApplicationTests(unittest.IsolatedAsyncioTestCase):
     async def test_provider_and_dealer_failures_return_safe_stable_envelopes(self) -> None:
         failures = (
             (
-                PlanningProviderError(ProviderErrorKind.TIMEOUT, retryable=True),
-                "planner_unavailable",
+                ConversationProviderError(ProviderErrorKind.TIMEOUT, retryable=True),
+                "assistant_unavailable",
             ),
             (
                 DealerError(

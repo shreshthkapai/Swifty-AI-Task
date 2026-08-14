@@ -190,19 +190,6 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.divergence.category, FailureCategory.PROVIDER_FAILURE)
         self.assertEqual(result.divergence.path, "provider")
 
-    def test_planner_output_failure_is_not_provider_transport(self) -> None:
-        corpus = load_corpus(CORPUS_PATH)
-        turn = corpus.scenarios[0].turns[0]
-
-        result = score_turn(
-            corpus.scenarios[0].id,
-            turn,
-            ObservedTurn(planner_failure="invalid_plan"),
-        )
-
-        self.assertEqual(result.divergence.category, FailureCategory.PLANNER_FAILURE)
-        self.assertEqual(result.divergence.path, "planner")
-
     def test_missing_required_adapter_call_is_scored_separately_from_command(self) -> None:
         corpus = load_corpus(CORPUS_PATH)
         scenario = next(item for item in corpus.scenarios if item.id == "vehicle-01")

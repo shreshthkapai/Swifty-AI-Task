@@ -4,19 +4,23 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from enum import StrEnum
 import json
 from pathlib import Path
 from typing import Any, Mapping
 
 from webchat.harness.contracts import (
+    HarnessCommand,
+    PreparationCommand,
     PreparationCommandName,
+    ReadCommand,
     ReadCommandName,
-    ResponseStrategy,
-    TurnPlan,
+    command_from_dict,
 )
 
 
 CORPUS_SCHEMA_VERSION = 1
+SCRIPTED_DECISION_SCHEMA_VERSION = 2
 CATEGORIES = {
     "vehicle_discovery",
     "sales_test_drive",
@@ -28,6 +32,115 @@ CATEGORIES = {
 COMMAND_NAMES = {item.value for item in ReadCommandName} | {
     item.value for item in PreparationCommandName
 }
+
+
+class ScriptedScope(StrEnum):
+    IN_DOMAIN = "in_domain"
+    DEALERSHIP_ADJACENT = "dealership_adjacent"
+    MIXED = "mixed"
+    OUT_OF_SCOPE = "out_of_scope"
+
+
+class ResponseStrategy(StrEnum):
+    """Eval-only labels used to score the observable response shape."""
+
+    SEARCH_RESULTS = "search_results"
+    VEHICLE_DETAILS = "vehicle_details"
+    COMPARISON = "comparison"
+    AVAILABILITY_RESULT = "availability_result"
+    OFFER_RESULTS = "offer_results"
+    SLOT_RESULTS = "slot_results"
+    WORKSHOP_DETAILS = "workshop_details"
+    BOOKING_DETAILS = "booking_details"
+    DEALERSHIP_DETAILS = "dealership_details"
+    BUSINESS_INFORMATION = "business_information"
+    MISSING_INFORMATION = "missing_information"
+    ACTION_PREPARED = "action_prepared"
+    GENERAL_GUIDANCE = "general_guidance"
+    DOMAIN_REDIRECT = "domain_redirect"
+    RECOVERY = "recovery"
+    ACKNOWLEDGEMENT = "acknowledgement"
+
+
+@dataclass(frozen=True, slots=True)
+class ScriptedDecision:
+    """Hermetic provider fixture; never consumed by the production harness."""
+
+    scope: ScriptedScope
+    commands: tuple[HarnessCommand, ...]
+    response_strategy: ResponseStrategy
+    response_mode: str
+    clarification_question: str | None = None
+    schema_version: int = SCRIPTED_DECISION_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if type(self.schema_version) is not int or self.schema_version != SCRIPTED_DECISION_SCHEMA_VERSION:
+            raise ValueError(f"unsupported scripted decision schema version: {self.schema_version}")
+        if len(self.commands) > 2:
+            raise ValueError("a scripted decision may contain at most two commands")
+        if sum(isinstance(command, PreparationCommand) for command in self.commands) > 1:
+            raise ValueError("a scripted decision may contain at most one preparation command")
+        if not all(isinstance(command, (ReadCommand, PreparationCommand)) for command in self.commands):
+            raise ValueError("scripted decision commands must be semantic commands")
+        if self.scope is ScriptedScope.OUT_OF_SCOPE and self.commands:
+            raise ValueError("an out-of-scope scripted decision cannot contain dealer commands")
+        if self.scope is ScriptedScope.OUT_OF_SCOPE and self.response_strategy is not ResponseStrategy.DOMAIN_REDIRECT:
+            raise ValueError("an out-of-scope scripted decision must use domain_redirect")
+        if self.scope is not ScriptedScope.OUT_OF_SCOPE and self.response_strategy is ResponseStrategy.DOMAIN_REDIRECT:
+            raise ValueError("domain_redirect is only valid for out-of-scope decisions")
+        if self.response_strategy is ResponseStrategy.MISSING_INFORMATION:
+            if not isinstance(self.clarification_question, str) or not self.clarification_question.strip():
+                raise ValueError("missing_information requires clarification_question")
+        elif self.clarification_question is not None:
+            raise ValueError("clarification_question requires missing_information strategy")
+
+    @classmethod
+    def from_data(cls, value: object) -> "ScriptedDecision":
+        data = _object(value, "scripted decision")
+        allowed = {
+            "schema_version", "scope", "commands", "response_strategy",
+            "response_mode", "clarification_question",
+        }
+        unknown = set(data) - allowed
+        if unknown:
+            raise ValueError(f"unknown scripted decision fields: {sorted(unknown)}")
+        commands = data.get("commands")
+        if not isinstance(commands, list):
+            raise ValueError("scripted decision commands must be an array")
+        try:
+            scope = ScriptedScope(data.get("scope"))
+            strategy = ResponseStrategy(data.get("response_strategy"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("scripted decision contains an unknown scope or strategy") from exc
+        mode = data.get("response_mode")
+        if not isinstance(mode, str) or not mode:
+            raise ValueError("scripted decision response_mode must be a string")
+        version = data.get("schema_version")
+        if type(version) is not int:
+            raise ValueError("scripted decision schema_version must be an integer")
+        clarification = data.get("clarification_question")
+        if clarification is not None and not isinstance(clarification, str):
+            raise ValueError("clarification_question must be a string")
+        return cls(
+            scope=scope,
+            commands=tuple(command_from_dict(command) for command in commands),
+            response_strategy=strategy,
+            response_mode=mode,
+            clarification_question=clarification,
+            schema_version=version,
+        )
+
+    def to_data(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "schema_version": self.schema_version,
+            "scope": self.scope.value,
+            "commands": [command.to_dict() for command in self.commands],
+            "response_strategy": self.response_strategy.value,
+            "response_mode": self.response_mode,
+        }
+        if self.clarification_question is not None:
+            result["clarification_question"] = self.clarification_question
+        return result
 
 
 class CorpusValidationError(ValueError):
@@ -286,7 +399,7 @@ class TurnExpectation:
 class CorpusTurn:
     id: str
     input: TurnInput
-    scripted_plan: TurnPlan | None
+    scripted_plan: ScriptedDecision | None
     expectation: TurnExpectation
 
     @classmethod
@@ -304,15 +417,13 @@ class CorpusTurn:
             plan = None
         else:
             try:
-                plan = TurnPlan.from_dict(raw_plan)
+                plan = ScriptedDecision.from_data(raw_plan)
             except ValueError as exc:
                 raise CorpusValidationError(f"{path}.scripted_plan: {exc}") from exc
         if turn_input.kind == "action" and plan is not None:
             raise CorpusValidationError(f"{path} action turns cannot have a scripted plan")
         if expectation.max_model_calls == 0 and plan is not None:
             raise CorpusValidationError(f"{path} zero-call turns cannot have a scripted plan")
-        if expectation.max_model_calls > 0 and plan is None:
-            raise CorpusValidationError(f"{path} planned turns require a scripted plan")
         if plan is not None:
             planned_names = {command.name.value for command in plan.commands}
             permitted = set(expectation.required_commands) | set(
@@ -342,7 +453,7 @@ class CorpusTurn:
             "id": self.id,
             "input": self.input.to_data(),
             "scripted_plan": (
-                self.scripted_plan.to_dict() if self.scripted_plan is not None else None
+                self.scripted_plan.to_data() if self.scripted_plan is not None else None
             ),
             "expect": self.expectation.to_data(),
         }

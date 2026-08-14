@@ -14,7 +14,8 @@ from urllib.parse import urlsplit
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from webchat.harness.runtime import SUPPORTED_UI_ACTION_TYPES, TurnResult
+from webchat.harness.execution import SUPPORTED_UI_ACTION_TYPES
+from webchat.harness.turn import TurnResult
 from webchat.harness.state import (
     ActionReference,
     MessageBlock,

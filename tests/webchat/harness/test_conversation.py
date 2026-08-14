@@ -8,7 +8,7 @@ from webchat.harness.conversation import (
     ConversationUsage,
     ToolExchange,
 )
-from webchat.harness.tool_gate import command_catalogue
+from webchat.harness.tools import command_catalogue
 
 
 USAGE = ConversationUsage(input_tokens=10, output_tokens=4, total_tokens=14)

@@ -8,9 +8,10 @@ from typing import Any
 from evals.fixtures import DealerSnapshot
 from evals.run import ObservedAnswer, ObservedTurn
 from webchat.harness.actions import PendingActionState, PendingActionType
-from webchat.harness.contracts import HarnessCommand, ResponseStrategy
+from evals.schema import ResponseStrategy
+from webchat.harness.contracts import HarnessCommand
 from webchat.harness.evidence import EvidenceItem
-from webchat.harness.runtime import TurnResult
+from webchat.harness.turn import TurnResult
 from webchat.harness.state import ConversationState, WorkflowDomain
 
 
@@ -120,7 +121,7 @@ def observe_turn(
     before_dealer: DealerSnapshot,
     after_dealer: DealerSnapshot,
     commands: tuple[HarnessCommand, ...],
-    planning_strategy: ResponseStrategy,
+    response_strategy: ResponseStrategy,
     current_input: str = "",
 ) -> ObservedTurn:
     """Build semantic evidence without consulting a turn expectation."""
@@ -352,7 +353,10 @@ def observe_turn(
     for code in notice_codes:
         _append(facts, *code_facts.get(code, ()))
         _append(next_steps, *code_steps.get(code, ()))
-    if "missing_information" in notice_codes:
+    if (
+        "missing_information" in notice_codes
+        or response_strategy is ResponseStrategy.MISSING_INFORMATION
+    ):
         clarification_text = " ".join(text_parts).casefold()
         price_conflict = (
             "budget conflict" in clarification_text
@@ -400,7 +404,12 @@ def observe_turn(
         _append(next_steps, "sales_enquiry")
     if "show_more" in action_types or "show_more" in current_input.casefold():
         _append(facts, "next_result_page")
-    if result.deterministic_route and result.deterministic_route.value in {"select_presented_entity", "ui_action"} and "confirmation" in block_types:
+    if "confirmation" in block_types and (
+        result.state.entities.selected_test_drive_slot_id
+        != before_state.entities.selected_test_drive_slot_id
+        or result.state.entities.selected_workshop_slot_id
+        != before_state.entities.selected_workshop_slot_id
+    ):
         _append(facts, "selected_slot_summary")
     if before_state.pending_action is not None and result.state.pending_action is None:
         if result.state.workflow.domain is not before_state.workflow.domain:
@@ -410,7 +419,7 @@ def observe_turn(
             _append(facts, "new_slot_summary")
     if "holiday_service_closed" in facts:
         _append(next_steps, "choose_another_date")
-    if planning_strategy is ResponseStrategy.GENERAL_GUIDANCE and any(
+    if response_strategy is ResponseStrategy.GENERAL_GUIDANCE and any(
         any(verb in text.casefold() for verb in ("show", "find", "browse", "see"))
         and "stock" in text.casefold()
         for text in text_parts
@@ -432,7 +441,7 @@ def observe_turn(
         output_tokens=result.output_tokens,
         latency_ms=result.provider_latency_ms,
         answer=ObservedAnswer(
-            strategy=planning_strategy.value,
+            strategy=response_strategy.value,
             block_types=block_types,
             entity_ids=tuple(entity_ids),
             facts=tuple(facts),

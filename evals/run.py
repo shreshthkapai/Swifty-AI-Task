@@ -16,7 +16,6 @@ from webchat.harness.contracts import HarnessCommand, PreparationCommand, ReadCo
 class FailureCategory(StrEnum):
     MODEL_REASONING = "MODEL_REASONING"
     PROVIDER_FAILURE = "PROVIDER_FAILURE"
-    PLANNER_FAILURE = "PLANNER_FAILURE"
     CONTEXT_MISSING = "CONTEXT_MISSING"
     BAD_TOOL_SCHEMA = "BAD_TOOL_SCHEMA"
     STATE_ERROR = "STATE_ERROR"
@@ -61,7 +60,7 @@ def assert_lane_parity(first: EvaluationLane, second: EvaluationLane) -> None:
     if {first.kind, second.kind} != {LaneKind.SCRIPTED, LaneKind.LIVE_PROVIDER}:
         raise ValueError("lane parity requires one scripted and one live-provider lane")
     if first.parity_fingerprint() != second.parity_fingerprint():
-        raise ValueError("lane parity inputs differ beyond the planning source")
+        raise ValueError("lane parity inputs differ beyond the conversation provider")
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +89,6 @@ class ObservedTurn:
     latency_ms: float = 0.0
     answer: ObservedAnswer | None = None
     provider_failure: str | None = None
-    planner_failure: str | None = None
     adapter_failure: str | None = None
     blocks: tuple[dict[str, Any], ...] = ()
     state_changes: dict[str, Any] | None = None
@@ -356,15 +354,6 @@ def _score_turn(
             "provider",
             None,
             observed.provider_failure,
-        )
-    if observed.planner_failure is not None:
-        return _failed(
-            scenario_id,
-            turn.id,
-            FailureCategory.PLANNER_FAILURE,
-            "planner",
-            None,
-            observed.planner_failure,
         )
     if observed.adapter_failure is not None:
         return _failed(

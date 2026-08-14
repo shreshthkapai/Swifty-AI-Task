@@ -94,7 +94,7 @@ class AppConfig:
         if self.environment not in LOCAL_ENVIRONMENTS | {"production"}:
             raise ValueError("CHAT_ENVIRONMENT must be local, development, test, or production")
         if self.provider != "openai":
-            raise ValueError("CHAT_PROVIDER must name a configured planning provider")
+            raise ValueError("CHAT_PROVIDER must name a configured conversation provider")
         if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("model must be a non-empty string")
         if not isinstance(self.openai_api_key, str) or not self.openai_api_key.strip():
@@ -137,7 +137,7 @@ class AppConfig:
         values = os.environ if environ is None else environ
         provider = values.get("CHAT_PROVIDER", "openai").strip().lower()
         if provider != "openai":
-            raise ValueError("CHAT_PROVIDER must name a configured planning provider")
+            raise ValueError("CHAT_PROVIDER must name a configured conversation provider")
         environment = values.get("CHAT_ENVIRONMENT", "local").strip().lower()
         retention_days = _positive_int(values, "CHAT_RETENTION_DAYS", 7)
         provider_timeout = _positive_float(values, "CHAT_PROVIDER_TIMEOUT_SECONDS", 30.0)

@@ -105,7 +105,6 @@ def _turn_data(record: EvaluatedTurn) -> dict[str, Any]:
             "blocks": list(observed.blocks),
             "answer": _answer_data(record),
             "provider_failure": observed.provider_failure,
-            "planner_failure": observed.planner_failure,
             "adapter_failure": observed.adapter_failure,
         },
         "score": {

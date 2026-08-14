@@ -230,6 +230,24 @@ class OpenAIConversationProviderTests(unittest.IsolatedAsyncioTestCase):
                         await provider.converse(request())
                 self.assertIs(raised.exception.kind, expected)
 
+    async def test_malformed_continuation_is_a_stable_provider_failure(self) -> None:
+        call = ConversationToolCall("call-1", "search_vehicles", {"make": "BMW"})
+        exchange = ToolExchange(
+            calls=(call,),
+            results=(ConversationToolResult("call-1", "search_vehicles", {"status": "ok"}),),
+            continuation="not-json",
+        )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: None)) as client:
+            provider = OpenAIConversationProvider(
+                client,
+                OpenAIProviderConfig(api_key="key", model="gpt-test"),
+            )
+            with self.assertRaises(ConversationProviderError) as raised:
+                await provider.converse(request(exchange=exchange))
+
+        self.assertIs(raised.exception.kind, ProviderErrorKind.INVALID_RESPONSE)
+
 
 async def _append(values, value):
     values.append(value)

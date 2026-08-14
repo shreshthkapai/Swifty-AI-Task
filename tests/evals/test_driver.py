@@ -3,40 +3,63 @@ import unittest
 
 from evals.driver import ProviderConversationDriver, ScriptedConversationDriver
 from evals.fixtures import FixtureRegistry
-from evals.schema import Corpus, load_corpus
-from webchat.providers.base import PlanningOutputError, PlanningOutputErrorKind
+from evals.schema import load_corpus
+from webchat.harness.conversation import (
+    ConversationResult,
+    ConversationToolCall,
+    ConversationUsage,
+)
+from webchat.providers.base import (
+    ConversationProviderError,
+    ProviderErrorKind,
+)
 
 
 NOW = datetime(2026, 8, 13, 12, tzinfo=UTC)
 
 
 class ScriptedConversationDriverTests(unittest.IsolatedAsyncioTestCase):
-    async def test_planner_output_error_is_captured_separately(self) -> None:
+    async def test_provider_error_is_captured_separately(self) -> None:
         scenario = load_corpus("evals/corpus.json").scenarios[0]
 
         class Provider:
-            async def plan(self, request):
-                raise PlanningOutputError(PlanningOutputErrorKind.INVALID_PLAN)
+            async def converse(self, request, *, on_text_delta=None):
+                raise ConversationProviderError(
+                    ProviderErrorKind.INVALID_RESPONSE,
+                    retryable=False,
+                )
 
         driver = ProviderConversationDriver(FixtureRegistry(now=NOW), Provider)
 
         observed = await driver.execute_turn(scenario, scenario.turns[0])
 
-        self.assertEqual(observed.planner_failure, "invalid_plan")
-        self.assertIsNone(observed.provider_failure)
-    async def test_provider_lane_observes_the_providers_actual_plan(self) -> None:
+        self.assertEqual(observed.provider_failure, "invalid_response")
+
+    async def test_provider_lane_observes_actual_semantic_tool_calls(self) -> None:
         scenario = load_corpus("evals/corpus.json").scenarios[0]
 
         class Provider:
-            async def plan(self, request):
-                from webchat.providers.base import PlanningResult, ProviderUsage
-
-                return PlanningResult(
-                    scenario.turns[0].scripted_plan,
-                    ProviderUsage(11, 7, 18),
-                    2.5,
-                    "test-provider",
-                    "test-model",
+            async def converse(self, request, *, on_text_delta=None):
+                if request.exchange is not None:
+                    return ConversationResult(
+                        text="I found matching vehicles.",
+                        usage=ConversationUsage(100, 20, 120),
+                        latency_ms=2,
+                        time_to_first_token_ms=1,
+                        provider="test-provider",
+                        model="test-model",
+                    )
+                return ConversationResult(
+                    tool_calls=(ConversationToolCall(
+                        "call-1",
+                        "search_vehicles",
+                        {"make": "BMW", "transmission": "Automatic", "max_price_minor": 4_000_000},
+                    ),),
+                    continuation="test-continuation",
+                    usage=ConversationUsage(11, 7, 18),
+                    latency_ms=1.5,
+                    provider="test-provider",
+                    model="test-model",
                 )
 
         driver = ProviderConversationDriver(FixtureRegistry(now=NOW), Provider)

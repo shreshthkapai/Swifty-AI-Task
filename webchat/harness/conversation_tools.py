@@ -14,7 +14,7 @@ from .contracts import (
     ReadCommandName,
     freeze_json_object,
 )
-from .tool_gate import (
+from .tools import (
     CommandKind,
     SemanticCommandSpec,
     command_catalogue,

@@ -20,7 +20,7 @@ class MultiTurnCorpusTests(unittest.TestCase):
                 "confirm",
             ],
         )
-        self.assertEqual(scenario.turns[1].expectation.max_model_calls, 0)
+        self.assertEqual(scenario.turns[1].expectation.max_model_calls, 2)
         self.assertEqual(scenario.turns[-1].expectation.side_effects, ("test_drive_booking:1",))
 
     def test_workshop_recovery_journey_verifies_before_writes(self) -> None:
