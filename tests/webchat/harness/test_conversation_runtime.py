@@ -41,6 +41,10 @@ from tests.webchat.harness.test_runtime import (
 USAGE = ConversationUsage(12, 6, 18)
 
 
+async def _append(values, value):
+    values.append(value)
+
+
 def answer(text: str, *, latency: float = 20) -> ConversationResult:
     return ConversationResult(
         text=text,
@@ -119,6 +123,19 @@ class ConversationRuntimeTests(unittest.IsolatedAsyncioTestCase):
             result.blocks[0].to_dict()["payload"]["text"],
             "An SUV can be practical for a family of five.",
         )
+
+    async def test_runtime_forwards_provider_text_deltas_without_changing_final_blocks(self) -> None:
+        provider = QueueProvider(answer("A streamed answer."))
+        runtime = ConversationRuntime(dealer=dealer(), conversation=provider)
+        deltas = []
+
+        result = await runtime.handle(
+            TurnRequest(current_input="Help", state=ConversationState(), now=NOW),
+            on_text_delta=lambda value: _append(deltas, value),
+        )
+
+        self.assertEqual(deltas, ["A streamed answer."])
+        self.assertEqual(result.blocks[0].to_dict()["payload"]["text"], "A streamed answer.")
 
     async def test_read_tool_gets_one_continuation_with_facts_then_text_before_cards(self) -> None:
         fake_dealer = dealer()

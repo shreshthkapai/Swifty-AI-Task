@@ -46,7 +46,12 @@ class ChatServices:
 
 
 class TurnRuntime(Protocol):
-    async def handle(self, request: TurnRequest) -> TurnResult: ...
+    async def handle(
+        self,
+        request: TurnRequest,
+        *,
+        on_text_delta=None,
+    ) -> TurnResult: ...
 
 
 def build_services(

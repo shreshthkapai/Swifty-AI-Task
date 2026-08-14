@@ -291,6 +291,22 @@
   color: var(--white);
 }
 
+.ns-chat-streaming .ns-chat-bubble::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 1em;
+  margin-left: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  vertical-align: -2px;
+  animation: ns-chat-cursor 800ms steps(2, end) infinite;
+}
+
+@keyframes ns-chat-cursor {
+  50% { opacity: 0; }
+}
+
 .ns-chat-action-submission {
   margin: 0;
   color: var(--muted);

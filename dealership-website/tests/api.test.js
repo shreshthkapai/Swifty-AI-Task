@@ -36,7 +36,12 @@ test("chat API sends one strict JSON turn payload", async () => {
     baseUrl: "http://localhost:4020/",
     fetchImpl: async (url, options) => {
       captured = { url, options };
-      return response(200, { schema_version: 1, revision: 1, duplicate: false, messages: [] });
+      return new Response(
+        '{"type":"text_delta","delta":"One "}\n'
+          + '{"type":"text_delta","delta":"answer."}\n'
+          + '{"type":"complete","payload":{"schema_version":1,"revision":1,"duplicate":false,"messages":[]}}\n',
+        { status: 200, headers: { "content-type": "application/x-ndjson" } },
+      );
     },
   });
   const payload = {
@@ -45,12 +50,33 @@ test("chat API sends one strict JSON turn payload", async () => {
     page_observation: { current_url: "/#vehicles", page_vehicle_id: "veh-003" },
   };
 
-  await api.sendTurn(payload);
+  const deltas = [];
+  const result = await api.sendTurn(payload, { onTextDelta: (delta) => deltas.push(delta) });
 
-  assert.equal(captured.url, "http://localhost:4020/api/chat/turns");
+  assert.equal(captured.url, "http://localhost:4020/api/chat/turns/stream");
   assert.equal(captured.options.method, "POST");
   assert.equal(captured.options.credentials, "include");
   assert.deepEqual(JSON.parse(captured.options.body), payload);
+  assert.deepEqual(deltas, ["One ", "answer."]);
+  assert.equal(result.revision, 1);
+});
+
+test("stream errors expose only the safe event envelope", async () => {
+  const api = createChatApi({
+    fetchImpl: async () => new Response(
+      '{"type":"text_delta","delta":"Partial"}\n'
+        + '{"type":"error","error":{"code":"chat_unavailable","message":"Please try again.","retryable":true}}\n',
+      { status: 200, headers: { "content-type": "application/x-ndjson" } },
+    ),
+  });
+
+  await assert.rejects(
+    () => api.sendTurn({ client_turn_id: "turn-2", text: "hello" }),
+    (error) => error instanceof ChatApiError
+      && error.code === "chat_unavailable"
+      && error.message === "Please try again."
+      && error.retryable === true,
+  );
 });
 
 test("chat API exposes only the server safe error envelope", async () => {

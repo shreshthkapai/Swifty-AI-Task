@@ -96,6 +96,33 @@ class ChatApplicationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.page_observation.observed_at, NOW)
         self.assertFalse(request.page_observation.is_authoritative)
 
+    async def test_streaming_turn_emits_deltas_then_one_committed_payload(self) -> None:
+        self.runtime.stream_deltas = ("A quick ", "answer.")
+
+        response = await self.client.post(
+            "/api/chat/turns/stream",
+            json={"client_turn_id": "turn-stream", "text": "Help me choose"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "application/x-ndjson")
+        events = [json.loads(line) for line in response.text.splitlines()]
+        self.assertEqual(
+            events[:2],
+            [
+                {"type": "text_delta", "delta": "A quick "},
+                {"type": "text_delta", "delta": "answer."},
+            ],
+        )
+        self.assertEqual(events[2]["type"], "complete")
+        self.assertEqual(events[2]["payload"]["revision"], 1)
+        self.assertEqual(
+            events[2]["payload"]["messages"][1]["blocks"][0]["payload"]["text"],
+            "A quick answer.",
+        )
+        restored = await self.client.get("/api/chat/session")
+        self.assertEqual(restored.json()["revision"], 1)
+
     async def test_duplicate_turn_returns_committed_result_without_runtime_call(self) -> None:
         body = {"client_turn_id": "turn-duplicate", "text": "Show me BMW SUVs"}
 

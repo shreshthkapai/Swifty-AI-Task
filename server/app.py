@@ -7,12 +7,13 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 import hashlib
+import json
 import time
 
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from webchat.domain.errors import DealerError
@@ -219,6 +220,127 @@ class ChatHttpApplication:
             response.headers["X-Request-ID"] = request_id
             return response
 
+    async def post_turn_stream(self, request: Request) -> Response:
+        request_id = _request_id()
+        conversation_id, _ = _conversation_id(request)
+        try:
+            payload = await _read_json(request, self.config.max_body_bytes)
+            turn = _parse_turn_payload(
+                payload,
+                now=self.clock(),
+                max_message_chars=self.config.max_message_chars,
+            )
+        except ApiProblem as exc:
+            response = _error_response(
+                exc.status_code,
+                exc.code,
+                exc.safe_message,
+                request_id,
+            )
+            self._set_cookie(response, conversation_id)
+            response.headers["X-Request-ID"] = request_id
+            return response
+
+        response = StreamingResponse(
+            self._stream_turn(
+                conversation_id,
+                turn,
+                request_id=request_id,
+            ),
+            media_type="application/x-ndjson",
+        )
+        self._set_cookie(response, conversation_id)
+        response.headers["X-Request-ID"] = request_id
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Accel-Buffering"] = "no"
+        return response
+
+    async def _stream_turn(
+        self,
+        conversation_id: str,
+        turn: IncomingTurn,
+        *,
+        request_id: str,
+    ) -> AsyncIterator[bytes]:
+        started = time.perf_counter()
+        deltas: asyncio.Queue[str] = asyncio.Queue()
+
+        async def on_text_delta(delta: str) -> None:
+            await deltas.put(delta)
+
+        with log_context(
+            request_id=request_id,
+            conversation_id=conversation_id,
+            route="POST /api/chat/turns/stream",
+            turn_id=turn.client_turn_id,
+        ):
+            task = asyncio.create_task(
+                self._execute_turn(
+                    conversation_id,
+                    turn,
+                    on_text_delta=on_text_delta,
+                )
+            )
+            try:
+                while not task.done() or not deltas.empty():
+                    if not deltas.empty():
+                        yield _ndjson({"type": "text_delta", "delta": deltas.get_nowait()})
+                        continue
+                    next_delta = asyncio.create_task(deltas.get())
+                    done, _ = await asyncio.wait(
+                        {task, next_delta},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if next_delta in done:
+                        yield _ndjson({"type": "text_delta", "delta": next_delta.result()})
+                    else:
+                        next_delta.cancel()
+                        try:
+                            await next_delta
+                        except asyncio.CancelledError:
+                            pass
+                result_response, result = await task
+                payload = json.loads(bytes(result_response.body))
+                yield _ndjson({"type": "complete", "payload": payload})
+                self.logger.emit(
+                    "chat_turn",
+                    operation="handle_turn",
+                    duration_ms=(time.perf_counter() - started) * 1_000,
+                    retries=0,
+                    model_calls=0 if result is None else result.model_calls,
+                    input_tokens=0 if result is None else result.input_tokens,
+                    output_tokens=0 if result is None else result.output_tokens,
+                    outcome="ok",
+                    status_code=200,
+                )
+            except asyncio.CancelledError:
+                task.cancel()
+                raise
+            except Exception as exc:
+                if not task.done():
+                    task.cancel()
+                code, message, retryable = _stream_failure(exc)
+                self.logger.emit(
+                    "chat_turn",
+                    operation="handle_turn",
+                    duration_ms=(time.perf_counter() - started) * 1_000,
+                    retries=0,
+                    model_calls=0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    outcome="error",
+                    error_kind=code,
+                    status_code=503,
+                )
+                yield _ndjson({
+                    "type": "error",
+                    "error": {
+                        "code": code,
+                        "message": message,
+                        "retryable": retryable,
+                    },
+                })
+
     async def delete_session(self, request: Request) -> Response:
         request_id = _request_id()
         conversation_id, _ = _conversation_id(request)
@@ -252,6 +374,8 @@ class ChatHttpApplication:
         self,
         conversation_id: str,
         turn: IncomingTurn,
+        *,
+        on_text_delta=None,
     ) -> tuple[Response, TurnResult | None]:
         async with self._lock_for(conversation_id):
             now = self.clock()
@@ -285,7 +409,8 @@ class ChatHttpApplication:
                     now=now,
                     recent_messages=record.messages,
                     prior_failures=prior_failures,
-                )
+                ),
+                on_text_delta=on_text_delta,
             )
             messages = _turn_messages(turn, result, now=now)
             commit = self.services.store.commit(
@@ -350,6 +475,46 @@ class ChatHttpApplication:
                 status_code=status_code,
             )
 
+
+def _ndjson(value: object) -> bytes:
+    return (
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _stream_failure(exc: Exception) -> tuple[str, str, bool]:
+    if isinstance(exc, RevisionConflictError):
+        return (
+            "turn_conflict",
+            "Another message is already being processed. Please try again.",
+            True,
+        )
+    if isinstance(exc, PersistenceError):
+        return (
+            "service_unavailable",
+            "The conversation could not be saved. Please try again.",
+            True,
+        )
+    if isinstance(exc, DealerError):
+        return (
+            "dealer_unavailable",
+            "Dealership information is temporarily unavailable. Please try again.",
+            True,
+        )
+    return (
+        "chat_unavailable",
+        "The assistant is temporarily unavailable. Please try again.",
+        True,
+    )
+
+
 def create_app(
     *,
     config: AppConfig | None = None,
@@ -387,6 +552,11 @@ def create_app(
             Route("/health", controller.health, methods=["GET"]),
             Route("/api/chat/session", controller.get_session, methods=["GET"]),
             Route("/api/chat/turns", controller.post_turn, methods=["POST"]),
+            Route(
+                "/api/chat/turns/stream",
+                controller.post_turn_stream,
+                methods=["POST"],
+            ),
             Route("/api/chat/session", controller.delete_session, methods=["DELETE"]),
         ],
         lifespan=lifespan,

@@ -70,17 +70,13 @@ class OpenAIConversationProviderTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json=payload([message("I can help with that.")]))
 
         times = iter((10.0, 10.125))
-        deltas = []
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             provider = OpenAIConversationProvider(
                 client,
                 OpenAIProviderConfig(api_key="secret", model="gpt-test"),
                 monotonic=lambda: next(times),
             )
-            result = await provider.converse(
-                request(),
-                on_text_delta=lambda value: _append(deltas, value),
-            )
+            result = await provider.converse(request())
 
         body = bodies[0]
         self.assertFalse(body["store"])
@@ -100,7 +96,38 @@ class OpenAIConversationProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.text, "I can help with that.")
         self.assertEqual(result.latency_ms, 125)
         self.assertEqual(result.usage.total_tokens, 100)
-        self.assertEqual(deltas, ["I can help with that."])
+
+    async def test_streaming_emits_real_text_deltas_and_returns_completed_response(self) -> None:
+        completed = payload([message("I can help with that.")])
+        events = (
+            'event: response.output_text.delta\n'
+            'data: {"type":"response.output_text.delta","delta":"I can "}\n\n'
+            'event: response.output_text.delta\n'
+            'data: {"type":"response.output_text.delta","delta":"help with that."}\n\n'
+            'event: response.completed\n'
+            f'data: {json.dumps({"type": "response.completed", "response": completed})}\n\n'
+        )
+
+        async def handler(_):
+            return httpx.Response(
+                200,
+                text=events,
+                headers={"content-type": "text/event-stream"},
+            )
+
+        times = iter((10.0, 10.025, 10.100))
+        deltas = []
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await OpenAIConversationProvider(
+                client,
+                OpenAIProviderConfig(api_key="key", model="gpt-test"),
+                monotonic=lambda: next(times),
+            ).converse(request(), on_text_delta=lambda value: _append(deltas, value))
+
+        self.assertEqual(deltas, ["I can ", "help with that."])
+        self.assertEqual(result.text, "I can help with that.")
+        self.assertAlmostEqual(result.time_to_first_token_ms, 25)
+        self.assertAlmostEqual(result.latency_ms, 100)
 
     async def test_tool_calls_preserve_all_output_items_as_opaque_continuation(self) -> None:
         reasoning = {

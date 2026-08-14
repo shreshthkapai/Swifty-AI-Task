@@ -10,7 +10,11 @@ from typing import Any
 
 from webchat.domain.dealer import DealerAdapter
 from webchat.domain.errors import DealerError
-from webchat.providers.base import ConversationProvider, ConversationProviderError
+from webchat.providers.base import (
+    ConversationProvider,
+    ConversationProviderError,
+    TextDeltaCallback,
+)
 
 from .conversation import (
     ConversationRequest,
@@ -71,7 +75,12 @@ class ConversationRuntime(HarnessRuntime):
         self._policy = policy or PolicyEngine()
         self._renderer = renderer or DeclarativeRenderer(id_factory=id_factory)
 
-    async def handle(self, request: TurnRequest) -> TurnResult:
+    async def handle(
+        self,
+        request: TurnRequest,
+        *,
+        on_text_delta: TextDeltaCallback | None = None,
+    ) -> TurnResult:
         turn_state = _state_for_turn(request)
         turn_request = replace(request, state=turn_state)
         if request.action_reference is not None:
@@ -85,7 +94,10 @@ class ConversationRuntime(HarnessRuntime):
         tools = conversation_tool_catalogue()
         initial_request = ConversationRequest(context=context, tools=tools)
         try:
-            first = await self._conversation.converse(initial_request)
+            first = await self._conversation.converse(
+                initial_request,
+                on_text_delta=on_text_delta,
+            )
         except ConversationProviderError as exc:
             return self._provider_failure(turn_state, exc.kind.value, calls=1)
 
@@ -189,7 +201,10 @@ class ConversationRuntime(HarnessRuntime):
             ),
         )
         try:
-            final = await self._conversation.converse(continuation_request)
+            final = await self._conversation.converse(
+                continuation_request,
+                on_text_delta=on_text_delta,
+            )
         except ConversationProviderError as exc:
             failure = self._provider_failure(
                 state,

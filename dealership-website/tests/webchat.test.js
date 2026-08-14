@@ -173,6 +173,48 @@ test("completed response preserves position when customer scrolls up while waiti
   assert.deepEqual(transcript.scrollCalls, []);
 });
 
+test("streamed answer appears incrementally and follows only while already at bottom", async () => {
+  const pending = deferred();
+  let emitDelta;
+  const { root, chat } = setup({
+    sendTurn: async (_payload, { onTextDelta }) => {
+      emitDelta = onTextDelta;
+      return pending.promise;
+    },
+  });
+  await chat.init();
+  const transcript = root.querySelector('[data-role="transcript"]');
+  transcript.clientHeight = 300;
+  transcript.scrollHeight = 900;
+  transcript.scrollTop = 600;
+  root.querySelector("textarea").value = "Help me choose";
+  root.querySelector("form").dispatchEvent(new TestEvent("submit"));
+
+  transcript.scrollCalls = [];
+  emitDelta("A quick ");
+  emitDelta("answer.");
+  assert.equal(root.querySelector(".ns-chat-streaming").textContent, "A quick answer.");
+  assert.equal(transcript.scrollTop, 600);
+
+  transcript.scrollTop = 120;
+  transcript.scrollCalls = [];
+  emitDelta(" More detail.");
+  assert.equal(transcript.scrollTop, 120);
+  assert.deepEqual(transcript.scrollCalls, []);
+
+  pending.resolve({
+    schema_version: 1,
+    revision: 1,
+    duplicate: false,
+    messages: [
+      message("user", "Help me choose", "u1"),
+      message("assistant", "A quick answer. More detail.", "a1"),
+    ],
+  });
+  await chat.whenIdle();
+  assert.equal(root.querySelector(".ns-chat-streaming"), null);
+});
+
 test("sending text includes live page context and blocks duplicate sends", async () => {
   const pending = deferred();
   const payloads = [];

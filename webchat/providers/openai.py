@@ -199,6 +199,8 @@ class OpenAIConversationProvider:
             raise ValueError("request must be a ConversationRequest")
         if on_text_delta is not None and not callable(on_text_delta):
             raise ValueError("on_text_delta must be callable or None")
+        if on_text_delta is not None:
+            return await self._converse_stream(request, on_text_delta)
         started = self._monotonic()
         try:
             response = await self._client.post(
@@ -239,9 +241,97 @@ class OpenAIConversationProvider:
                 ProviderErrorKind.INVALID_RESPONSE,
                 retryable=False,
             ) from exc
-        if result.text is not None and on_text_delta is not None:
-            await on_text_delta(result.text)
         return result
+
+    async def _converse_stream(
+        self,
+        request: ConversationRequest,
+        on_text_delta: TextDeltaCallback,
+    ) -> ConversationResult:
+        started = self._monotonic()
+        completed: object | None = None
+        streamed_parts: list[str] = []
+        first_token_ms: float | None = None
+        try:
+            body = self._request_body(request)
+            body["stream"] = True
+            async with self._client.stream(
+                "POST",
+                f"{self._config.base_url}/responses",
+                headers={
+                    "Authorization": f"Bearer {self._config.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+                timeout=self._config.timeout_seconds,
+            ) as response:
+                if response.status_code >= 400:
+                    raise ConversationProviderError(
+                        ProviderErrorKind.HTTP_ERROR,
+                        retryable=(
+                            response.status_code in {408, 409, 429}
+                            or response.status_code >= 500
+                        ),
+                        status_code=response.status_code,
+                    )
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    raw = line[6:]
+                    if raw == "[DONE]":
+                        continue
+                    event = json.loads(raw)
+                    if not isinstance(event, Mapping):
+                        raise ValueError("stream event must be an object")
+                    event_type = event.get("type")
+                    if event_type == "response.output_text.delta":
+                        delta = event.get("delta")
+                        if not isinstance(delta, str) or not delta:
+                            raise ValueError("text delta must be a non-empty string")
+                        if first_token_ms is None:
+                            first_token_ms = (self._monotonic() - started) * 1_000
+                        streamed_parts.append(delta)
+                        await on_text_delta(delta)
+                    elif event_type == "response.completed":
+                        completed = event.get("response")
+                    elif event_type in {"response.failed", "response.incomplete"}:
+                        raise ValueError("provider stream did not complete")
+        except ConversationProviderError:
+            raise
+        except httpx.TimeoutException as exc:
+            raise ConversationProviderError(
+                ProviderErrorKind.TIMEOUT,
+                retryable=True,
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ConversationProviderError(
+                ProviderErrorKind.TRANSPORT,
+                retryable=True,
+            ) from exc
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ConversationProviderError(
+                ProviderErrorKind.INVALID_RESPONSE,
+                retryable=False,
+            ) from exc
+        elapsed_ms = (self._monotonic() - started) * 1_000
+        try:
+            result = self._parse_response(
+                completed,
+                latency_ms=elapsed_ms,
+                time_to_first_token_ms=first_token_ms,
+            )
+            if result.text is not None and result.text != "".join(streamed_parts):
+                raise ValueError("streamed text does not match completed response")
+            if result.text is None and streamed_parts:
+                raise ValueError("tool response cannot contain streamed text")
+            return result
+        except ConversationProviderError:
+            raise
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ConversationProviderError(
+                ProviderErrorKind.INVALID_RESPONSE,
+                retryable=False,
+            ) from exc
 
     def _request_body(self, request: ConversationRequest) -> dict[str, Any]:
         exchange = request.exchange
@@ -280,7 +370,12 @@ class OpenAIConversationProvider:
         return body
 
     @staticmethod
-    def _parse_response(value: object, *, latency_ms: float) -> ConversationResult:
+    def _parse_response(
+        value: object,
+        *,
+        latency_ms: float,
+        time_to_first_token_ms: float | None = None,
+    ) -> ConversationResult:
         if not isinstance(value, Mapping) or value.get("status") != "completed":
             raise ValueError("response must be a completed object")
         output = value.get("output")
@@ -340,7 +435,11 @@ class OpenAIConversationProvider:
                 raise ValueError("response must contain exactly one output_text item")
             text = texts[0]
             continuation = None
-            first_token_ms = latency_ms
+            first_token_ms = (
+                latency_ms
+                if time_to_first_token_ms is None
+                else time_to_first_token_ms
+            )
         model = value.get("model")
         if not isinstance(model, str) or not model.strip():
             raise ValueError("response model must be a string")

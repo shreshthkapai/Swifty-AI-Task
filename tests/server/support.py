@@ -43,9 +43,10 @@ class FakeRuntime:
         self.delay_seconds = 0.0
         self.active = 0
         self.max_active = 0
+        self.stream_deltas: tuple[str, ...] = ()
         self.renderer = DeclarativeRenderer(id_factory=lambda: "server-action")
 
-    async def handle(self, request):
+    async def handle(self, request, *, on_text_delta=None):
         self.requests.append(request)
         self.active += 1
         self.max_active = max(self.max_active, self.active)
@@ -54,12 +55,15 @@ class FakeRuntime:
                 await asyncio.sleep(self.delay_seconds)
             if self.failure is not None:
                 raise self.failure
+            if on_text_delta is not None:
+                for delta in self.stream_deltas:
+                    await on_text_delta(delta)
             state = request.state
             if request.page_observation is not None:
                 state = replace(state, context=request.page_observation)
             return TurnResult(
                 state=state,
-                blocks=(self.renderer.text("A safe response."),),
+                blocks=(self.renderer.text("".join(self.stream_deltas) or "A safe response."),),
                 model_calls=1,
                 input_tokens=10,
                 output_tokens=5,

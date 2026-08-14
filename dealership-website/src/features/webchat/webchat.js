@@ -123,6 +123,18 @@ function welcome(document, onPrompt) {
   return container;
 }
 
+function streamingMessage(document, text) {
+  const message = renderMessage(document, {
+    message_id: "streaming",
+    role: "assistant",
+    text,
+    blocks: [],
+  }, { onAction: () => {} });
+  message.classList.add("ns-chat-streaming");
+  message.setAttribute("aria-label", "Northstar AI is responding");
+  return message;
+}
+
 function cleanFilters(controls) {
   if (!controls) return undefined;
   const configured = [
@@ -161,6 +173,7 @@ export function createWebchat({ root, api, getPageObservation, document = global
   let busy = false;
   let inFlight = Promise.resolve();
   let optimisticText = null;
+  let streamingText = "";
   let retryOperation = null;
   let submittedActionIds = new Set();
 
@@ -193,6 +206,7 @@ export function createWebchat({ root, api, getPageObservation, document = global
         message_id: "optimistic", role: "user", text: optimisticText, blocks: [],
       }, { onAction: submitAction }));
     }
+    if (streamingText) fragment.append(streamingMessage(document, streamingText));
     nodes.transcript.replaceChildren(fragment);
     applyBusyState();
     if (anchor === "bottom") {
@@ -211,6 +225,29 @@ export function createWebchat({ root, api, getPageObservation, document = global
       return;
     }
     nodes.transcript.scrollTop = previousTop;
+  }
+
+  function appendTextDelta(delta) {
+    if (!delta) return;
+    const wasAtBottom = (
+      nodes.transcript.scrollTop + nodes.transcript.clientHeight
+      >= nodes.transcript.scrollHeight - 2
+    );
+    streamingText += delta;
+    let draft = nodes.transcript.querySelector(".ns-chat-streaming");
+    if (!draft) {
+      draft = streamingMessage(document, streamingText);
+      nodes.transcript.append(draft);
+    } else {
+      draft.querySelector(".ns-chat-bubble").textContent = streamingText;
+    }
+    setStatus("", true);
+    if (wasAtBottom) {
+      nodes.transcript.scrollTop = Math.max(
+        0,
+        nodes.transcript.scrollHeight - nodes.transcript.clientHeight,
+      );
+    }
   }
 
   function applyBusyState() {
@@ -253,18 +290,21 @@ export function createWebchat({ root, api, getPageObservation, document = global
     if (busy) return;
     busy = true;
     optimisticText = displayText;
+    streamingText = "";
     clearError();
     setStatus("Northstar AI is working…", true);
     renderTranscript({ anchor: "bottom" });
     let completed = false;
     try {
-      const result = await api.sendTurn(payload);
+      const result = await api.sendTurn(payload, { onTextDelta: appendTextDelta });
       messages.push(...result.messages);
       rememberSubmittedActions(result.messages);
       optimisticText = null;
+      streamingText = "";
       completed = true;
       if (!open) root.classList.add("has-unread");
     } catch (error) {
+      streamingText = "";
       showError(error, () => {
         inFlight = perform(payload, displayText);
         return inFlight;
@@ -309,6 +349,7 @@ export function createWebchat({ root, api, getPageObservation, document = global
       messages = [];
       submittedActionIds = new Set();
       optimisticText = null;
+      streamingText = "";
       nodes.resetConfirmation.hidden = true;
       renderTranscript({ anchor: "bottom", behavior: "auto" });
     } catch (error) {
