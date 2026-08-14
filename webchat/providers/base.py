@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
 import json
@@ -12,6 +13,7 @@ from webchat.domain.common import require_non_empty
 from webchat.harness.contracts import TurnPlan
 from webchat.harness.grounded_response import GroundedClaim, GroundedResponseRequest
 from webchat.harness.tool_gate import SemanticCommandSpec
+from webchat.harness.conversation import ConversationRequest, ConversationResult
 
 
 PLANNING_REQUEST_SCHEMA_VERSION = 1
@@ -186,6 +188,45 @@ class GroundedResponseProviderError(Exception):
         self.retryable = retryable
         self.status_code = status_code
         super().__init__(kind.value)
+
+
+class ConversationProviderError(Exception):
+    """Safe provider failure for the conversational runtime."""
+
+    def __init__(
+        self,
+        kind: ProviderErrorKind,
+        *,
+        retryable: bool,
+        status_code: int | None = None,
+    ) -> None:
+        if not isinstance(kind, ProviderErrorKind):
+            raise TypeError("kind must be a ProviderErrorKind")
+        if not isinstance(retryable, bool):
+            raise TypeError("retryable must be boolean")
+        if status_code is not None and (
+            type(status_code) is not int or not 100 <= status_code <= 599
+        ):
+            raise TypeError("status_code must be an HTTP status code or None")
+        self.kind = kind
+        self.retryable = retryable
+        self.status_code = status_code
+        super().__init__(kind.value)
+
+
+TextDeltaCallback = Callable[[str], Awaitable[None]]
+
+
+@runtime_checkable
+class ConversationProvider(Protocol):
+    async def converse(
+        self,
+        request: ConversationRequest,
+        *,
+        on_text_delta: TextDeltaCallback | None = None,
+    ) -> ConversationResult:
+        """Return natural text or one bounded batch of semantic tool calls."""
+        ...
 
 
 @runtime_checkable
