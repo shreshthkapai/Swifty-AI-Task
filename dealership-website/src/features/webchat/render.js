@@ -31,6 +31,22 @@ const LABELS = {
 
 const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
+const ACTION_SUBMISSION_TEXT = {
+  cancel: "Action cancelled",
+  confirm: "Action confirmed",
+  find_test_drive_slots: "Requested test-drive times",
+  register_interest: "Requested to register interest",
+  retry: "Request retried",
+  sales_enquiry: "Sales enquiry selected",
+  select_dealership: "Dealership selected",
+  select_test_drive_slot: "Test-drive slot selected",
+  select_vehicle: "Vehicle selected",
+  select_workshop_slot: "Workshop slot selected",
+  show_more: "Requested more results",
+  start_over: "Started over",
+  switch_workflow: "Changed task",
+};
+
 const HIDDEN_FIELDS = new Set([
   "id", "dealership_id", "service_type_id", "vehicle_id", "latitude", "longitude",
   "can_book_test_drive", "can_register_interest", "can_enquire", "kind", "currency",
@@ -268,7 +284,14 @@ function renderBlock(document, block, onAction) {
   if (block.kind === "actions") return renderActions(document, payload, onAction);
   if (block.kind === "confirmation") return renderConfirmation(document, payload, onAction);
   if (block.kind === "link") return renderLink(document, payload);
-  if (block.kind === "action_submission") return element(document, "p", "ns-chat-action-submission", "Selected an option");
+  if (block.kind === "action_submission") {
+    return element(
+      document,
+      "p",
+      "ns-chat-action-submission",
+      ACTION_SUBMISSION_TEXT[payload.action_type] || "Option selected",
+    );
+  }
   if (Array.isArray(payload.items)) return renderRecords(document, block.kind, payload, onAction);
   return element(document, "p", "ns-chat-notice", "This response cannot be displayed.");
 }

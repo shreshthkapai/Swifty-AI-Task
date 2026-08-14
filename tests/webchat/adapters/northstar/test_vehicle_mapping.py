@@ -104,6 +104,31 @@ class VehicleMappingTestCase(unittest.TestCase):
         self.assertEqual(vehicle.images, ("http://northstar.test/assets/vehicles/veh-003.jpg",))
         self.assertEqual(vehicle.updated_at, datetime(2026, 8, 12, 10, 30, tzinfo=timezone.utc))
 
+    def test_assets_use_browser_facing_origin_when_api_runs_inside_docker(self) -> None:
+        config = NorthstarConfig(
+            base_url="http://dealership-platform:4010",
+            public_base_url="http://localhost:4010",
+            api_key="server-key",
+        )
+
+        result = vehicles_from_payload(
+            {
+                "items": [VEHICLE_PAYLOAD],
+                "pagination": {
+                    "page": 1,
+                    "pageSize": 12,
+                    "totalItems": 1,
+                    "totalPages": 1,
+                },
+            },
+            config,
+        )
+
+        self.assertEqual(
+            result.items[0].images,
+            ("http://localhost:4010/assets/vehicles/veh-003.jpg",),
+        )
+
     def test_null_vehicle_prices_remain_absent(self) -> None:
         payload = {**VEHICLE_PAYLOAD, "pricePence": None, "monthlyPricePence": None}
         result = vehicles_from_payload(
@@ -138,11 +163,16 @@ class VehicleMappingTestCase(unittest.TestCase):
                     "id": "td-slot-003-1",
                     "startsAt": "2026-08-13T09:00:00+00:00",
                 },
-            }
+            },
+            self.config,
         )
 
         self.assertIs(availability.status, VehicleAvailabilityStatus.AVAILABLE)
         self.assertEqual(availability.next_test_drive_slot.id, "td-slot-003-1")
+        self.assertEqual(
+            availability.next_test_drive_slot.starts_at.isoformat(),
+            "2026-08-13T10:00:00+01:00",
+        )
 
         reserved = availability_from_payload(
             {
@@ -152,7 +182,8 @@ class VehicleMappingTestCase(unittest.TestCase):
                 "canBookTestDrive": False,
                 "canRegisterInterest": True,
                 "nextTestDriveSlot": None,
-            }
+            },
+            self.config,
         )
         self.assertIsNone(reserved.next_test_drive_slot)
 

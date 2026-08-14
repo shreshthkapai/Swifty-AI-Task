@@ -11,6 +11,7 @@ def valid_environment() -> dict[str, str]:
         "CHAT_PLANNER_MODEL": "fast-planner-model",
         "OPENAI_API_KEY": "provider-secret",
         "NORTHSTAR_BASE_URL": "http://dealership-platform:4010",
+        "NORTHSTAR_PUBLIC_BASE_URL": "http://localhost:4010",
         "NORTHSTAR_API_KEY": "dealer-secret",
         "CHAT_DATABASE_PATH": "/data/chat.sqlite3",
         "CHAT_ALLOWED_ORIGIN": "http://localhost:4173",
@@ -30,6 +31,7 @@ class AppConfigTests(unittest.TestCase):
         self.assertEqual(config.response_model, "response-model")
         self.assertEqual(config.planner_model, "fast-planner-model")
         self.assertEqual(config.northstar.base_url, "http://dealership-platform:4010")
+        self.assertEqual(config.northstar.public_base_url, "http://localhost:4010")
         self.assertEqual(config.allowed_origin, "http://localhost:4173")
         self.assertEqual(config.retention_seconds, 7 * 24 * 60 * 60)
         self.assertFalse(config.cookie_secure)

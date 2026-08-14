@@ -38,6 +38,7 @@ from .common import (
     read_object,
     read_optional_str,
     read_str,
+    read_zoned_datetime,
 )
 
 
@@ -93,11 +94,14 @@ def test_drive_slot_search_to_params(search: TestDriveSlotSearch) -> dict[str, s
     return {key: value for key, value in values.items() if value is not None}
 
 
-def test_drive_slots_from_payload(payload: object) -> tuple[TestDriveSlot, ...]:
-    return tuple(_test_drive_slot(item) for item in read_items(payload))
+def test_drive_slots_from_payload(
+    payload: object,
+    config: NorthstarConfig,
+) -> tuple[TestDriveSlot, ...]:
+    return tuple(_test_drive_slot(item, config) for item in read_items(payload))
 
 
-def _test_drive_slot(payload: JsonObject) -> TestDriveSlot:
+def _test_drive_slot(payload: JsonObject, config: NorthstarConfig) -> TestDriveSlot:
     if read_str(payload, "status") != "available":
         raise invalid_response(resource="test_drive_slot")
     try:
@@ -105,7 +109,7 @@ def _test_drive_slot(payload: JsonObject) -> TestDriveSlot:
             id=read_str(payload, "id"),
             dealership_id=read_str(payload, "dealershipId"),
             vehicle_id=read_str(payload, "vehicleId"),
-            starts_at=read_datetime(payload, "startsAt"),
+            starts_at=read_zoned_datetime(payload, "startsAt", config.timezone),
             dealership_name=read_str(payload, "dealershipName"),
             vehicle_label=" ".join(
                 (

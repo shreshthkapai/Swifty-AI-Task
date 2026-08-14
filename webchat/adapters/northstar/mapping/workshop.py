@@ -27,6 +27,7 @@ from .common import (
     read_optional_datetime,
     read_optional_str,
     read_str,
+    read_zoned_datetime,
 )
 
 
@@ -75,7 +76,7 @@ def _workshop_slot(payload: JsonObject, config: NorthstarConfig) -> WorkshopSlot
             id=read_str(payload, "id"),
             dealership_id=read_str(payload, "dealershipId"),
             service_type_id=read_str(payload, "serviceTypeId"),
-            starts_at=read_datetime(payload, "startsAt"),
+            starts_at=read_zoned_datetime(payload, "startsAt", config.timezone),
             dealership_name=read_str(payload, "dealershipName"),
             service_name=read_str(payload, "serviceName"),
             duration_minutes=read_int(payload, "durationMinutes"),
@@ -146,6 +147,7 @@ def workshop_booking_from_payload(payload: object) -> WorkshopBooking:
 def workshop_booking_details_from_payload(
     payload: object,
     dealership: DealerLocation,
+    config: NorthstarConfig,
 ) -> WorkshopBookingDetails:
     body = read_object(payload)
     if (
@@ -158,7 +160,7 @@ def workshop_booking_details_from_payload(
     try:
         return WorkshopBookingDetails(
             booking=workshop_booking_from_payload(body),
-            starts_at=read_datetime(body, "startsAt"),
+            starts_at=read_zoned_datetime(body, "startsAt", config.timezone),
             service_type_name=read_str(body, "serviceTypeName"),
             dealership=dealership,
         )

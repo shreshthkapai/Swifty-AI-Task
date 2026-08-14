@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "httpx==0.28.1",
     "starlette==0.48.0",
+    "tzdata==2025.3",
     "uvicorn==0.52.3",
 ]
 

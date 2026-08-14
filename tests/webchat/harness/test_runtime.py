@@ -739,6 +739,47 @@ class HarnessRuntimeTests(unittest.IsolatedAsyncioTestCase):
         fake.get_vehicle.assert_awaited_once_with("veh-003")
         self.assertEqual(result.state.entities.selected_vehicle_id, "veh-003")
 
+    async def test_live_page_vehicle_supersedes_persisted_conversation_focus(self) -> None:
+        fake = dealer()
+
+        async def get_vehicle(vehicle_id: str) -> VehicleDetails:
+            return VehicleDetails(vehicle(vehicle_id), ("Large boot",))
+
+        fake.get_vehicle.side_effect = get_vehicle
+        plan = TurnPlan(
+            TurnScope.IN_DOMAIN,
+            (ReadCommand(ReadCommandName.GET_VEHICLE_DETAILS),),
+            ResponseStrategy.VEHICLE_DETAILS,
+        )
+        harness, provider = runtime(fake, plan)
+        state = ConversationState(
+            entities=EntityContext(
+                selected_vehicle_id="veh-previous",
+                selected_test_drive_slot_id="slot-for-previous",
+            )
+        )
+        observation = PageContext(
+            current_url="/?vehicle=veh-page#vehicles",
+            page_vehicle_id="veh-page",
+            observed_at=NOW,
+        )
+
+        result = await harness.handle(TurnRequest(
+            current_input="Which vehicle is selected?",
+            state=state,
+            now=NOW,
+            page_observation=observation,
+        ))
+
+        fake.get_vehicle.assert_awaited_once_with("veh-page")
+        self.assertEqual(result.state.context, observation)
+        self.assertEqual(result.state.entities.selected_vehicle_id, "veh-page")
+        self.assertIsNone(result.state.entities.selected_test_drive_slot_id)
+        self.assertIn(
+            '"selected_vehicle_id":"veh-page"',
+            provider.requests[0].context,
+        )
+
     async def test_slot_intent_checks_availability_before_retrieving_slots(self) -> None:
         fake = dealer()
         calls = []

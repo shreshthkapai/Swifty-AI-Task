@@ -113,6 +113,21 @@ class _GroundedOutcome:
     focused_entity_id: str | None = None
 
 
+def _state_for_turn(request: TurnRequest) -> ConversationState:
+    observation = request.page_observation
+    if observation is None:
+        return request.state
+    entities = request.state.entities
+    page_vehicle_id = observation.page_vehicle_id
+    if page_vehicle_id is not None and page_vehicle_id != entities.selected_vehicle_id:
+        entities = replace(
+            entities,
+            selected_vehicle_id=page_vehicle_id,
+            selected_test_drive_slot_id=None,
+        )
+    return replace(request.state, context=observation, entities=entities)
+
+
 class HarnessRuntime:
     """Execute one planning decision, bounded command batch, and state reduction."""
 
@@ -136,13 +151,10 @@ class HarnessRuntime:
         self._response_validator = response_validator or GroundedResponseValidator()
 
     async def handle(self, request: TurnRequest) -> TurnResult:
-        turn_state = (
-            request.state
-            if request.page_observation is None
-            else replace(request.state, context=request.page_observation)
-        )
+        turn_state = _state_for_turn(request)
+        turn_request = replace(request, state=turn_state)
         try:
-            decision = await self._planning.decide(request)
+            decision = await self._planning.decide(turn_request)
         except PlanningOutputError as exc:
             return TurnResult(
                 state=turn_state,
@@ -160,7 +172,7 @@ class HarnessRuntime:
         if decision.deterministic_route is not None:
             outcome = await self._execute_route(
                 decision.deterministic_route,
-                request=replace(request, state=turn_state),
+                request=turn_request,
             )
             return TurnResult(
                 state=outcome.state,

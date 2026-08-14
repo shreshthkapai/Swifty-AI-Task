@@ -57,6 +57,7 @@ class WorkshopMappingTestCase(unittest.TestCase):
         self.assertIsNone(services[1].price_from)
         self.assertEqual(slots[0].price_from, Money(5499, "GBP"))
         self.assertEqual(slots[0].service_name, "MOT")
+        self.assertEqual(slots[0].starts_at.isoformat(), "2026-08-14T10:00:00+01:00")
 
     def test_slot_search_uses_iso_dates_and_exact_keys(self) -> None:
         search = WorkshopSlotSearch(
@@ -108,10 +109,15 @@ class WorkshopMappingTestCase(unittest.TestCase):
             },
         )
         location = location_from_payload(LOCATION_PAYLOAD, self.config)
-        details = workshop_booking_details_from_payload(WORKSHOP_LOOKUP_PAYLOAD, location)
+        details = workshop_booking_details_from_payload(
+            WORKSHOP_LOOKUP_PAYLOAD,
+            location,
+            self.config,
+        )
         self.assertEqual(details.booking.id, "wsb-1")
         self.assertEqual(details.service_type_name, "MOT")
         self.assertEqual(details.dealership, location)
+        self.assertEqual(details.starts_at.isoformat(), "2026-08-14T10:00:00+01:00")
 
     def test_amendment_distinguishes_omitted_notes_from_explicit_clear(self) -> None:
         mileage_only = WorkshopBookingAmendment("wsb-1", mileage=51000)
@@ -146,7 +152,7 @@ class WorkshopMappingTestCase(unittest.TestCase):
         location = location_from_payload(LOCATION_PAYLOAD, self.config)
         partial = {key: value for key, value in WORKSHOP_LOOKUP_PAYLOAD.items() if key != "startsAt"}
         with self.assertRaises(Exception) as lookup_error:
-            workshop_booking_details_from_payload(partial, location)
+            workshop_booking_details_from_payload(partial, location, self.config)
         self.assertEqual(lookup_error.exception.kind, DealerErrorKind.INVALID_RESPONSE)
 
 

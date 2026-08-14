@@ -93,8 +93,12 @@ class SalesMappingTestCase(unittest.TestCase):
                 "dateTo": "2026-08-20",
             },
         )
-        slots = test_drive_slots_from_payload({"items": [TEST_DRIVE_SLOT_PAYLOAD]})
+        slots = test_drive_slots_from_payload(
+            {"items": [TEST_DRIVE_SLOT_PAYLOAD]},
+            self.config,
+        )
         self.assertEqual(slots[0].vehicle_label, "BMW X3 xDrive20d M Sport")
+        self.assertEqual(slots[0].starts_at.isoformat(), "2026-08-13T10:00:00+01:00")
 
     def test_test_drive_booking_maps_nullable_notes_and_record(self) -> None:
         request = TestDriveBookingRequest("td-slot-003-1", self.customer, "Morning preferred.")

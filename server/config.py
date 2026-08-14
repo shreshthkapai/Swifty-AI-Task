@@ -149,6 +149,7 @@ class AppConfig:
         max_message = _positive_int(values, "CHAT_MAX_MESSAGE_CHARS", 4_000)
         northstar = NorthstarConfig(
             base_url=values.get("NORTHSTAR_BASE_URL", "http://localhost:4010"),
+            public_base_url=values.get("NORTHSTAR_PUBLIC_BASE_URL"),
             api_key=_required(values, "NORTHSTAR_API_KEY"),
             connect_timeout_seconds=_positive_float(
                 values, "NORTHSTAR_CONNECT_TIMEOUT_SECONDS", 2.0

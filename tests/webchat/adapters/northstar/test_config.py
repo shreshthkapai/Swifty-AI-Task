@@ -11,6 +11,7 @@ class NorthstarConfigTestCase(unittest.TestCase):
         )
 
         self.assertEqual(config.base_url, "http://localhost:4010")
+        self.assertEqual(config.public_base_url, "http://localhost:4010")
         self.assertEqual(config.currency, "GBP")
         self.assertEqual(config.timezone, "Europe/London")
         self.assertEqual(config.country, "United Kingdom")
@@ -25,11 +26,13 @@ class NorthstarConfigTestCase(unittest.TestCase):
         config = NorthstarConfig.from_env(
             {
                 "NORTHSTAR_BASE_URL": "http://platform:4010/",
+                "NORTHSTAR_PUBLIC_BASE_URL": "http://localhost:4010/",
                 "NORTHSTAR_API_KEY": "server-key",
             }
         )
 
         self.assertEqual(config.base_url, "http://platform:4010")
+        self.assertEqual(config.public_base_url, "http://localhost:4010")
         self.assertEqual(config.api_key, "server-key")
 
     def test_invalid_numeric_configuration_is_rejected(self) -> None:
@@ -59,6 +62,13 @@ class NorthstarConfigTestCase(unittest.TestCase):
         ):
             with self.subTest(base_url=base_url, api_key=api_key), self.assertRaises(ValueError):
                 NorthstarConfig(base_url=base_url, api_key=api_key)
+
+        with self.assertRaisesRegex(ValueError, "public_base_url"):
+            NorthstarConfig(
+                base_url="http://platform:4010",
+                public_base_url="http://localhost:4010/assets",
+                api_key="server-key",
+            )
 
     def test_api_key_is_redacted_from_configuration_representation(self) -> None:
         config = NorthstarConfig("http://localhost:4010", "do-not-log-this-key")

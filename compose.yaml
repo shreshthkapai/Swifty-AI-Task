@@ -45,6 +45,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       NORTHSTAR_BASE_URL: http://dealership-platform:4010
+      NORTHSTAR_PUBLIC_BASE_URL: ${NORTHSTAR_PUBLIC_BASE_URL:-http://localhost:4010}
       NORTHSTAR_API_KEY: ${NORTHSTAR_API_KEY:-northstar-local-development}
       CHAT_DATABASE_PATH: /data/webchat.sqlite3
       CHAT_ALLOWED_ORIGIN: ${CHAT_ALLOWED_ORIGIN:-http://localhost:4173}

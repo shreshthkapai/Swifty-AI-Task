@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from webchat.domain import CustomerIdentity, Money
 
@@ -85,6 +86,14 @@ def read_optional_datetime(payload: JsonObject, key: str) -> datetime | None:
     if payload.get(key) is None:
         return None
     return read_datetime(payload, key)
+
+
+def read_zoned_datetime(payload: JsonObject, key: str, timezone: str) -> datetime:
+    try:
+        zone = ZoneInfo(timezone)
+    except ZoneInfoNotFoundError as error:
+        raise invalid_response() from error
+    return read_datetime(payload, key).astimezone(zone)
 
 
 def read_date(payload: JsonObject, key: str) -> date:

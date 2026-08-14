@@ -126,6 +126,33 @@ class PreparationWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 ):
                     method.assert_not_awaited()
 
+    async def test_missing_test_drive_customer_details_use_customer_facing_language(self) -> None:
+        state = ConversationState(
+            entities=replace(
+                ConversationState().entities,
+                selected_vehicle_id="veh-003",
+                selected_test_drive_slot_id="td-slot-1",
+            ),
+            workflow=WorkflowState(
+                WorkflowDomain.TEST_DRIVE,
+                WorkflowStage.SELECTING_SLOT,
+            ),
+        )
+
+        fake, result = await self._prepare(
+            PreparationCommandName.PREPARE_TEST_DRIVE_BOOKING,
+            {"slot_id": "td-slot-1"},
+            state=state,
+        )
+
+        payload = result.blocks[0].to_dict()["payload"]
+        self.assertEqual(
+            payload["text"],
+            "To arrange the test drive, please provide your full name, email address and phone number.",
+        )
+        self.assertNotIn("first_name", payload["text"])
+        fake.book_test_drive.assert_not_awaited()
+
     async def test_verified_workshop_changes_prepare_but_do_not_execute(self) -> None:
         state = ConversationState(
             customer=CUSTOMER_STATE,

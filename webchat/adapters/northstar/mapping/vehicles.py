@@ -1,6 +1,6 @@
 """Northstar vehicle inventory, availability, and offer mappings."""
 
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from webchat.domain import (
     AvailabilitySlot,
@@ -30,6 +30,7 @@ from .common import (
     read_optional_decimal,
     read_str,
     read_string_tuple,
+    read_zoned_datetime,
 )
 
 
@@ -126,7 +127,10 @@ def vehicle_details_from_payload(payload: object, config: NorthstarConfig) -> Ve
         raise invalid_response(resource="vehicle") from error
 
 
-def availability_from_payload(payload: object) -> VehicleAvailability:
+def availability_from_payload(
+    payload: object,
+    config: NorthstarConfig,
+) -> VehicleAvailability:
     body = read_object(payload)
     next_payload = body.get("nextTestDriveSlot")
     if next_payload is None:
@@ -136,7 +140,7 @@ def availability_from_payload(payload: object) -> VehicleAvailability:
         try:
             next_slot = AvailabilitySlot(
                 id=read_str(slot, "id"),
-                starts_at=read_datetime(slot, "startsAt"),
+                starts_at=read_zoned_datetime(slot, "startsAt", config.timezone),
             )
         except ValueError as error:
             raise invalid_response(resource="vehicle_availability") from error
@@ -198,9 +202,12 @@ def _required_money(payload: JsonObject, key: str, currency: str) -> Money:
 
 def _asset_url(value: str, config: NorthstarConfig) -> str:
     if value.startswith("/") and not value.startswith("//"):
-        return f"{config.base_url}{value}"
+        return f"{config.public_base_url}{value}"
     parsed = urlsplit(value)
     base = urlsplit(config.base_url)
     if parsed.scheme in {"http", "https"} and parsed.netloc == base.netloc:
-        return value
+        public = urlsplit(config.public_base_url)
+        return urlunsplit(
+            (public.scheme, public.netloc, parsed.path, parsed.query, parsed.fragment)
+        )
     raise invalid_response(resource="asset")

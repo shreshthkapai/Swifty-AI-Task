@@ -6,12 +6,31 @@ import os
 from urllib.parse import urlsplit
 
 
+def _http_origin(value: object, name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be an HTTP URL")
+    normalized = value.rstrip("/")
+    parsed = urlsplit(normalized)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ValueError(f"{name} must be an HTTP origin without credentials or a path")
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class NorthstarConfig:
     """Northstar connection, locale, retry, and stable-cache settings."""
 
     base_url: str
     api_key: str = field(repr=False)
+    public_base_url: str | None = None
     currency: str = "GBP"
     timezone: str = "Europe/London"
     country: str = "United Kingdom"
@@ -23,21 +42,16 @@ class NorthstarConfig:
     location_cache_ttl_seconds: float = 300.0
 
     def __post_init__(self) -> None:
-        if not isinstance(self.base_url, str):
-            raise ValueError("base_url must be an HTTP URL")
-        normalized_url = self.base_url.rstrip("/")
-        parsed = urlsplit(normalized_url)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.netloc
-            or parsed.path
-            or parsed.query
-            or parsed.fragment
-            or parsed.username is not None
-            or parsed.password is not None
-        ):
-            raise ValueError("base_url must be an HTTP origin without credentials or a path")
+        normalized_url = _http_origin(self.base_url, "base_url")
         object.__setattr__(self, "base_url", normalized_url)
+        object.__setattr__(
+            self,
+            "public_base_url",
+            _http_origin(
+                normalized_url if self.public_base_url is None else self.public_base_url,
+                "public_base_url",
+            ),
+        )
 
         if not isinstance(self.api_key, str) or not self.api_key.strip():
             raise ValueError("api_key must be a non-empty server-side secret")
@@ -81,5 +95,6 @@ class NorthstarConfig:
             raise ValueError("NORTHSTAR_API_KEY must be configured server-side")
         return cls(
             base_url=values.get("NORTHSTAR_BASE_URL", "http://localhost:4010"),
+            public_base_url=values.get("NORTHSTAR_PUBLIC_BASE_URL"),
             api_key=api_key,
         )

@@ -183,7 +183,7 @@ class NorthstarAdapter:
             f"/api/vehicles/{quote(vehicle_id, safe='')}/availability",
             resource="vehicle_availability",
         )
-        return availability_from_payload(payload)
+        return availability_from_payload(payload, self._client.config)
 
     async def list_offers(self, search: OfferSearch) -> tuple[VehicleOffer, ...]:
         payload = await self._read(
@@ -230,7 +230,7 @@ class NorthstarAdapter:
             params=test_drive_slot_search_to_params(search),
             resource="test_drive_slots",
         )
-        return test_drive_slots_from_payload(payload)
+        return test_drive_slots_from_payload(payload, self._client.config)
 
     async def book_test_drive(
         self,
@@ -362,7 +362,11 @@ class NorthstarAdapter:
         )
         booking = workshop_booking_from_payload(payload)
         dealership = await self.get_dealership(booking.dealership_id)
-        return workshop_booking_details_from_payload(payload, dealership)
+        return workshop_booking_details_from_payload(
+            payload,
+            dealership,
+            self._client.config,
+        )
 
     async def get_workshop_booking(self, booking_id: str) -> WorkshopBooking:
         payload = await self._read(

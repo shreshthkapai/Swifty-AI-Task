@@ -184,11 +184,57 @@ def missing_information(
         next_state,
         (
             renderer.notice(
-                f"I still need: {', '.join(ordered)}.",
+                f"{_missing_information_intro(domain)}, please provide "
+                f"{_natural_field_list(ordered)}.",
                 code="missing_information",
             ),
         ),
     )
+
+
+_FIELD_LABELS = {
+    "booking_id": "your booking reference",
+    "dealership_id": "a dealership",
+    "email": "your email address",
+    "first_name": "your first name",
+    "last_name": "your last name",
+    "message": "a message",
+    "mileage": "your vehicle's current mileage",
+    "phone": "your phone number",
+    "registration": "your vehicle registration",
+    "service_type_id": "a service type",
+    "slot_id": "a suitable slot",
+    "slot_id_or_booking_change": "a new slot or another booking change",
+    "vehicle_id": "a vehicle",
+}
+
+
+def _missing_information_intro(domain: WorkflowDomain) -> str:
+    return {
+        WorkflowDomain.TEST_DRIVE: "To arrange the test drive",
+        WorkflowDomain.WORKSHOP: "To continue with your workshop request",
+        WorkflowDomain.SALES: "To continue with your sales request",
+        WorkflowDomain.DEALERSHIP: "To contact the dealership",
+    }.get(domain, "To continue")
+
+
+def _natural_field_list(fields: Sequence[str]) -> str:
+    remaining = set(fields)
+    labels: list[str] = []
+    for field in fields:
+        if field not in remaining:
+            continue
+        if field in {"first_name", "last_name"} and {"first_name", "last_name"} <= remaining:
+            labels.append("your full name")
+            remaining.difference_update({"first_name", "last_name"})
+            continue
+        labels.append(_FIELD_LABELS.get(field, field.replace("_", " ")))
+        remaining.remove(field)
+    if labels and labels[0].startswith("your "):
+        labels[1:] = [label.removeprefix("your ") for label in labels[1:]]
+    if len(labels) < 2:
+        return "".join(labels)
+    return f"{', '.join(labels[:-1])} and {labels[-1]}"
 
 
 def policy_recovery(

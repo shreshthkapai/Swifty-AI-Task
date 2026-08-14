@@ -24,6 +24,18 @@ test("message rendering treats model text as inert text", () => {
   assert.equal(rendered.querySelector("img"), null);
 });
 
+test("action submissions describe the selected dealership operation", () => {
+  const document = new TestDocument();
+  const message = assistant([{
+    kind: "action_submission",
+    payload: { schema_version: 1, action_type: "select_test_drive_slot" },
+  }]);
+
+  const rendered = renderMessage(document, message, { onAction() {} });
+
+  assert.equal(rendered.textContent, "Test-drive slot selected");
+});
+
 test("vehicle cards render dealer facts and dispatch only their server action reference", () => {
   const document = new TestDocument();
   const actions = [];
