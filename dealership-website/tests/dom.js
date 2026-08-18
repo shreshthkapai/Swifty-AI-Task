@@ -88,6 +88,15 @@ export class TestElement {
     return this._text + this.childNodes.map((child) => child.textContent).join("");
   }
 
+  set innerHTML(value) {
+    this._text = String(value ?? "").replace(/<[^>]*>/g, "");
+    this.childNodes = [];
+  }
+
+  get innerHTML() {
+    return "";
+  }
+
   append(...nodes) {
     for (const node of nodes) {
       const child = typeof node === "string"

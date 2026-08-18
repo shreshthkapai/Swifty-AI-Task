@@ -1,4 +1,4 @@
-"""Thin conversational orchestration with at most one semantic tool round."""
+"""Thin conversational orchestration with up to two bounded semantic tool rounds."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from webchat.providers.base import (
 
 from .conversation import (
     ConversationRequest,
-    ConversationResult,
     ConversationToolResult,
     ToolExchange,
 )
@@ -49,6 +48,7 @@ from .workflows.common import CommandOutcome, dealer_recovery
 
 MAX_RECENT_MESSAGES = 8
 MAX_PRESENTATION_GROUPS_IN_CONTEXT = 3
+MAX_TOOL_ROUNDS = 2
 
 
 def _random_id() -> str:
@@ -96,155 +96,184 @@ class ConversationRuntime(CommandExecutor):
 
         context = _compile_context(turn_request)
         tools = conversation_tool_catalogue()
-        initial_request = ConversationRequest(context=context, tools=tools)
-        try:
-            first = await self._conversation.converse(
-                initial_request,
-                on_text_delta=on_text_delta,
-            )
-        except ConversationProviderError as exc:
-            return self._provider_failure(turn_state, exc.kind.value, calls=1)
 
-        if first.text is not None:
-            return TurnResult(
-                state=turn_state,
-                blocks=(self._renderer.text(first.text),),
-                model_calls=1,
-                input_tokens=first.usage.input_tokens,
-                output_tokens=first.usage.output_tokens,
-                provider_latency_ms=first.latency_ms,
-            )
+        state = turn_state
+        text_blocks: list[MessageBlock] = []
+        tool_blocks: list[MessageBlock] = []
+        all_evidence: list = []
+        all_executed: list[str] = []
+        model_calls = 0
+        total_input = 0
+        total_output = 0
+        total_latency = 0.0
+        exchange: ToolExchange | None = None
 
-        try:
-            commands = tuple(conversation_command(call) for call in first.tool_calls)
-            _validate_batch(commands)
-        except ValueError:
-            return self._provider_failure(
-                turn_state,
-                "invalid_tool_call",
-                calls=1,
-                first=first,
+        for round_num in range(MAX_TOOL_ROUNDS + 1):
+            force_text = round_num == MAX_TOOL_ROUNDS
+            conv_request = ConversationRequest(
+                context=context,
+                tools=tools,
+                exchange=exchange,
+                force_text=force_text,
             )
-
-        dealer_commands = tuple(
-            command for command in commands if not isinstance(command, ConversationControl)
-        )
-        execution_base = (
-            self.supersede_for_switch(turn_state, dealer_commands)
-            if dealer_commands
-            else turn_state
-        )
-        state = execution_base
-        blocks: list[MessageBlock] = []
-        evidence = []
-        results: list[ConversationToolResult] = []
-        executed: list[str] = []
-        terminal_execution = False
-        if len(commands) > 1 and all(isinstance(item, ReadCommand) for item in commands):
-            executed_outcomes = await asyncio.gather(
-                *(
-                    self._safe_execute(command, state=state, now=request.now)
-                    for command in commands
+            try:
+                result = await self._conversation.converse(
+                    conv_request,
+                    on_text_delta=on_text_delta,
                 )
-            )
-            state = _merge_read_states(
-                execution_base,
-                tuple(outcome.state for outcome, _ in executed_outcomes),
-            )
-        else:
-            executed_outcomes = []
-            current_state = state
-            for command in commands:
-                outcome, is_error = await self._safe_execute(
-                    command,
-                    state=current_state,
-                    now=request.now,
+            except ConversationProviderError as exc:
+                return TurnResult(
+                    state=state,
+                    blocks=(self.provider_recovery(),) + tuple(tool_blocks),
+                    evidence=tuple(all_evidence),
+                    executed_commands=tuple(all_executed),
+                    model_calls=model_calls + 1,
+                    input_tokens=total_input,
+                    output_tokens=total_output,
+                    provider_latency_ms=total_latency,
+                    provider_failure=exc.kind.value,
                 )
-                current_state = outcome.state
-                executed_outcomes.append((outcome, is_error))
-            state = current_state
 
-        for call, command, (outcome, is_error) in zip(
-            first.tool_calls,
-            commands,
-            executed_outcomes,
-            strict=True,
-        ):
-            executed.append(call.name)
-            blocks.extend(outcome.blocks)
-            evidence.extend(outcome.evidence)
-            results.append(
-                ConversationToolResult(
-                    call.call_id,
-                    call.name,
-                    _tool_output(outcome, is_error=is_error),
-                    is_error=is_error,
+            model_calls += 1
+            total_input += result.usage.input_tokens
+            total_output += result.usage.output_tokens
+            total_latency += result.latency_ms
+
+            if result.text is not None:
+                text_blocks.append(self._renderer.text(result.text))
+
+            if not result.tool_calls:
+                return TurnResult(
+                    state=state,
+                    blocks=tuple(text_blocks) + tuple(tool_blocks),
+                    evidence=tuple(all_evidence),
+                    executed_commands=tuple(all_executed),
+                    model_calls=model_calls,
+                    input_tokens=total_input,
+                    output_tokens=total_output,
+                    provider_latency_ms=total_latency,
                 )
-            )
-            terminal_execution = terminal_execution or _is_terminal(command)
 
-        if terminal_execution:
-            return TurnResult(
-                state=state,
-                blocks=tuple(blocks),
-                evidence=tuple(evidence),
-                executed_commands=tuple(executed),
-                model_calls=1,
-                input_tokens=first.usage.input_tokens,
-                output_tokens=first.usage.output_tokens,
-                provider_latency_ms=first.latency_ms,
+            if force_text:
+                return TurnResult(
+                    state=state,
+                    blocks=(self.provider_recovery(),) + tuple(tool_blocks),
+                    evidence=tuple(all_evidence),
+                    executed_commands=tuple(all_executed),
+                    model_calls=model_calls,
+                    input_tokens=total_input,
+                    output_tokens=total_output,
+                    provider_latency_ms=total_latency,
+                    provider_failure="tool_round_limit",
+                )
+
+            try:
+                commands = tuple(conversation_command(call) for call in result.tool_calls)
+                _validate_batch(commands)
+            except ValueError:
+                return TurnResult(
+                    state=state,
+                    blocks=(self.provider_recovery(),) + tuple(tool_blocks),
+                    evidence=tuple(all_evidence),
+                    executed_commands=tuple(all_executed),
+                    model_calls=model_calls,
+                    input_tokens=total_input,
+                    output_tokens=total_output,
+                    provider_latency_ms=total_latency,
+                    provider_failure="invalid_tool_call",
+                )
+
+            dealer_commands = tuple(
+                command for command in commands if not isinstance(command, ConversationControl)
+            )
+            execution_base = (
+                self.supersede_for_switch(state, dealer_commands)
+                if dealer_commands
+                else state
             )
 
-        continuation_request = ConversationRequest(
-            context=context,
-            tools=tools,
-            exchange=ToolExchange(
-                first.tool_calls,
-                tuple(results),
-                continuation=first.continuation,
-            ),
-        )
-        try:
-            final = await self._conversation.converse(
-                continuation_request,
-                on_text_delta=on_text_delta,
+            blocks: list[MessageBlock] = []
+            evidence: list = []
+            tool_results: list[ConversationToolResult] = []
+            executed: list[str] = []
+            terminal_execution = False
+
+            if len(commands) > 1 and all(isinstance(item, ReadCommand) for item in commands):
+                executed_outcomes = await asyncio.gather(
+                    *(
+                        self._safe_execute(command, state=execution_base, now=request.now)
+                        for command in commands
+                    )
+                )
+                state = _merge_read_states(
+                    execution_base,
+                    tuple(outcome.state for outcome, _ in executed_outcomes),
+                )
+            else:
+                executed_outcomes = []
+                current_state = execution_base
+                for command in commands:
+                    outcome, is_error = await self._safe_execute(
+                        command,
+                        state=current_state,
+                        now=request.now,
+                    )
+                    current_state = outcome.state
+                    executed_outcomes.append((outcome, is_error))
+                state = current_state
+
+            for call, command, (outcome, is_error) in zip(
+                result.tool_calls,
+                commands,
+                executed_outcomes,
+                strict=True,
+            ):
+                executed.append(call.name)
+                blocks.extend(outcome.blocks)
+                evidence.extend(outcome.evidence)
+                tool_results.append(
+                    ConversationToolResult(
+                        call.call_id,
+                        call.name,
+                        _tool_output(outcome, is_error=is_error),
+                        is_error=is_error,
+                    )
+                )
+                terminal_execution = terminal_execution or _is_terminal(command)
+
+            tool_blocks.extend(blocks)
+            all_evidence.extend(evidence)
+            all_executed.extend(executed)
+
+            if terminal_execution:
+                return TurnResult(
+                    state=state,
+                    blocks=tuple(text_blocks) + tuple(tool_blocks),
+                    evidence=tuple(all_evidence),
+                    executed_commands=tuple(all_executed),
+                    model_calls=model_calls,
+                    input_tokens=total_input,
+                    output_tokens=total_output,
+                    provider_latency_ms=total_latency,
+                )
+
+            exchange = ToolExchange(
+                result.tool_calls,
+                tuple(tool_results),
+                continuation=result.continuation,
+                prior=exchange,
             )
-        except ConversationProviderError as exc:
-            failure = self._provider_failure(
-                state,
-                exc.kind.value,
-                calls=2,
-                first=first,
-                blocks=tuple(blocks),
-            )
-            return replace(
-                failure,
-                evidence=tuple(evidence),
-                executed_commands=tuple(executed),
-            )
-        if final.tool_calls:
-            failure = self._provider_failure(
-                state,
-                "tool_round_limit",
-                calls=2,
-                first=first,
-                second=final,
-                blocks=tuple(blocks),
-            )
-            return replace(
-                failure,
-                evidence=tuple(evidence),
-                executed_commands=tuple(executed),
-            )
+
         return TurnResult(
             state=state,
-            blocks=(self._renderer.text(final.text),) + tuple(blocks),
-            evidence=tuple(evidence),
-            executed_commands=tuple(executed),
-            model_calls=2,
-            input_tokens=first.usage.input_tokens + final.usage.input_tokens,
-            output_tokens=first.usage.output_tokens + final.usage.output_tokens,
-            provider_latency_ms=first.latency_ms + final.latency_ms,
+            blocks=(self.provider_recovery(),) + tuple(tool_blocks),
+            evidence=tuple(all_evidence),
+            executed_commands=tuple(all_executed),
+            model_calls=model_calls,
+            input_tokens=total_input,
+            output_tokens=total_output,
+            provider_latency_ms=total_latency,
+            provider_failure="tool_round_limit",
         )
 
     def _provider_failure(
@@ -347,8 +376,6 @@ def _validate_batch(
     preparations = sum(isinstance(item, PreparationCommand) for item in commands)
     if preparations > 1:
         raise ValueError("a turn cannot prepare multiple consequential actions")
-    if preparations and len(commands) > 1:
-        raise ValueError("a preparation cannot be combined with another tool call")
     controls = sum(isinstance(item, ConversationControl) for item in commands)
     if controls and len(commands) > 1:
         raise ValueError("a control cannot be combined with another tool call")
@@ -356,7 +383,7 @@ def _validate_batch(
 
 def _is_terminal(command: ConversationCommand) -> bool:
     if isinstance(command, PreparationCommand):
-        return True
+        return False
     if not isinstance(command, ConversationControl):
         return False
     return command.name not in {
@@ -431,47 +458,63 @@ def _tool_output(outcome: CommandOutcome, *, is_error: bool) -> dict[str, Any]:
 def _compile_context(request: TurnRequest) -> str:
     state = request.state
     pending = state.pending_action
-    payload = {
+    selected = {
+        k: v
+        for k, v in {
+            "vehicle_id": state.entities.selected_vehicle_id,
+            "dealership_id": state.entities.selected_dealer_id,
+            "test_drive_slot_id": state.entities.selected_test_drive_slot_id,
+            "workshop_slot_id": state.entities.selected_workshop_slot_id,
+        }.items()
+        if v is not None
+    }
+    active_grants = [
+        {
+            "booking_id": grant.booking_id,
+            "expires_at": grant.expires_at.isoformat(),
+        }
+        for grant in state.verification_grants
+        if grant.is_active(request.now)
+    ]
+    presented = [
+        group.to_dict()
+        for group in state.presentation_groups[-MAX_PRESENTATION_GROUPS_IN_CONTEXT:]
+    ]
+    state_payload: dict[str, Any] = {
+        "customer": state.customer.to_dict(),
+        "page": state.context.to_dict(),
+        "workflow": state.workflow.to_dict(),
+    }
+    if selected:
+        state_payload["selected"] = selected
+    prefs = state.preferences.to_dict()
+    if any(v is not None for v in prefs.values()):
+        state_payload["preferences"] = prefs
+    if pending is not None:
+        state_payload["pending_action"] = {
+            "action_id": pending.action_id,
+            "action_type": pending.action_type.value,
+            "state": pending.state.value,
+            "expires_at": pending.expires_at.isoformat(),
+        }
+    if active_grants:
+        state_payload["verification_grants"] = active_grants
+    if presented:
+        state_payload["presented"] = presented
+    payload: dict[str, Any] = {
         "current_input": request.current_input,
         "current_time": request.now.isoformat(),
-        "state": {
-            "customer": state.customer.to_dict(),
-            "page": state.context.to_dict(),
-            "selected": {
-                "vehicle_id": state.entities.selected_vehicle_id,
-                "dealership_id": state.entities.selected_dealer_id,
-                "test_drive_slot_id": state.entities.selected_test_drive_slot_id,
-                "workshop_slot_id": state.entities.selected_workshop_slot_id,
-            },
-            "preferences": state.preferences.to_dict(),
-            "workflow": state.workflow.to_dict(),
-            "pending_action": None
-            if pending is None
-            else {
-                "action_id": pending.action_id,
-                "action_type": pending.action_type.value,
-                "state": pending.state.value,
-                "expires_at": pending.expires_at.isoformat(),
-            },
-            "verification_grants": [
-                {
-                    "booking_id": grant.booking_id,
-                    "expires_at": grant.expires_at.isoformat(),
-                }
-                for grant in state.verification_grants
-                if grant.is_active(request.now)
-            ],
-            "presented": [
-                group.to_dict()
-                for group in state.presentation_groups[-MAX_PRESENTATION_GROUPS_IN_CONTEXT:]
-            ],
-        },
-        "recent_messages": [
-            _message_context(message, state)
-            for message in request.recent_messages[-MAX_RECENT_MESSAGES:]
-        ],
-        "prior_failures": [_failure_context(failure) for failure in request.prior_failures],
+        "state": state_payload,
     }
+    recent = request.recent_messages[-MAX_RECENT_MESSAGES:]
+    if recent:
+        payload["recent_messages"] = [
+            _message_context(message, state) for message in recent
+        ]
+    if request.prior_failures:
+        payload["prior_failures"] = [
+            _failure_context(failure) for failure in request.prior_failures
+        ]
     return json.dumps(
         payload,
         ensure_ascii=False,

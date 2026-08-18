@@ -115,7 +115,7 @@ _CATALOGUE = (
     _spec(
         ReadCommandName.SEARCH_VEHICLES,
         (V, S, T),
-        "Search dealership inventory using customer constraints; use dealership_query for customer-facing location wording; returned facts remain dealer-authoritative.",
+        "Search dealership inventory. Use natural language in query, structured filters for make/model/fuel/price/etc. Use dealership_query for location (e.g. 'Manchester'). To refine a previous search, adjust or add filters rather than starting from scratch.",
         {
             "query": _nullable("string"),
             "make": _nullable("string"),
@@ -165,10 +165,10 @@ _CATALOGUE = (
             "page_size": _nullable("integer", minimum=1),
         },
     ),
-    _spec(ReadCommandName.GET_VEHICLE_DETAILS, (V, S, T), "Get one vehicle's dealer-authored details.", _VEHICLE_ID),
+    _spec(ReadCommandName.GET_VEHICLE_DETAILS, (V, S, T), "Get full details for a specific vehicle. Use the vehicle_id from state.selected or state.page when the customer says 'this car', 'tell me more', etc.", _VEHICLE_ID),
     _spec(ReadCommandName.COMPARE_VEHICLES, (V,), "Compare a bounded set of known vehicle IDs.", {"vehicle_ids": _array("string")}),
-    _spec(ReadCommandName.CHECK_VEHICLE_AVAILABILITY, (V, S, T), "Read live vehicle availability and permitted next actions.", _VEHICLE_ID),
-    _spec(ReadCommandName.LIST_NEW_CAR_OFFERS, (V, S), "List current new-car offers.", {"make": _nullable("string"), "product_type": _nullable("string")}),
+    _spec(ReadCommandName.CHECK_VEHICLE_AVAILABILITY, (V, S, T), "Check if a vehicle is available, reserved, or sold, and what actions are possible. Use when asked 'is this available?', 'can I buy this?', etc.", _VEHICLE_ID),
+    _spec(ReadCommandName.LIST_NEW_CAR_OFFERS, (V, S), "List current new-car offers and deals. Use when asked about offers, deals, or promotions.", {"make": _nullable("string"), "product_type": _nullable("string")}),
     _spec(
         ReadCommandName.FIND_TEST_DRIVE_SLOTS,
         (T,),
@@ -186,7 +186,7 @@ _CATALOGUE = (
     _spec(
         ReadCommandName.RETRIEVE_WORKSHOP_BOOKING,
         (W,),
-        "Verify customer identity and retrieve a workshop booking; copy every newly supplied or corrected identity field from the current input while the handler merges omitted known fields.",
+        "Look up an existing workshop booking. The customer must provide their booking reference, surname, vehicle registration, and phone number. Pass whatever identity details the customer has given so far.",
         {"reference": _nullable("string"), "last_name": _nullable("string"), "registration": _nullable("string"), "phone": _nullable("string")},
     ),
     _spec(ReadCommandName.LIST_DEALERSHIPS, (D, S, T, W), "List dealership locations."),
@@ -196,19 +196,19 @@ _CATALOGUE = (
     _spec(
         PreparationCommandName.PREPARE_TEST_DRIVE_BOOKING,
         (T,),
-        "Prepare, but never execute, a test-drive booking for confirmation.",
+        "Prepare a test-drive booking for the customer to confirm. Include the slot_id and any customer details provided. The booking won't happen until the customer confirms.",
         {"slot_id": _nullable("string"), **_CUSTOMER, "notes": _nullable("string")},
     ),
     _spec(
         PreparationCommandName.PREPARE_SALES_ENQUIRY,
         (S,),
-        "Prepare, but never send, a vehicle or general sales enquiry; capture the customer's stated reason in message and use dealership_query for customer-facing location wording.",
+        "Prepare a sales enquiry (general, availability, finance, or part-exchange). Capture what the customer wants in the message field. Use dealership_query for location.",
         {**_DEALERSHIP_REFERENCE, "enquiry_type": _nullable("string", enum=["general", "availability", "finance", "part_exchange"]), **_CUSTOMER, "message": _nullable("string"), **_VEHICLE_ID},
     ),
     _spec(
         PreparationCommandName.PREPARE_VEHICLE_INTEREST,
         (S,),
-        "Prepare interest registration for an eligible reserved vehicle.",
+        "Register the customer's interest in a reserved vehicle so they're contacted when it becomes available.",
         {**_VEHICLE_ID, **_CUSTOMER, "notes": _nullable("string")},
     ),
     _spec(
@@ -226,13 +226,13 @@ _CATALOGUE = (
     _spec(
         PreparationCommandName.PREPARE_WORKSHOP_BOOKING,
         (W,),
-        "Prepare, but never execute, a workshop booking for confirmation.",
+        "Prepare a workshop booking for the customer to confirm. Include the slot_id and customer details. The booking won't happen until confirmed.",
         {"slot_id": _nullable("string"), **_CUSTOMER, "registration": _nullable("string"), "mileage": _nullable("integer", minimum=0), "notes": _nullable("string")},
     ),
     _spec(
         PreparationCommandName.PREPARE_WORKSHOP_AMENDMENT,
         (W,),
-        "Use for an explicit amendment request even when verification or change details are missing; the handler enforces authorization and collects omissions. Use slot_ordinal for an ordered fresh slot choice.",
+        "Amend an existing workshop booking (change slot, date, mileage, or notes). The customer must have verified their booking first. Use slot_ordinal to pick from recently shown slots.",
         {"booking_id": _nullable("string"), "slot_id": _nullable("string"), "slot_ordinal": _nullable("integer", minimum=1), "date_from": _nullable("string"), "date_to": _nullable("string"), "mileage": _nullable("integer", minimum=0), "notes": _nullable("string")},
     ),
     _spec(PreparationCommandName.PREPARE_WORKSHOP_CANCELLATION, (W,), "Prepare cancellation of an authorised workshop booking.", {"booking_id": _nullable("string")}),

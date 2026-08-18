@@ -20,7 +20,8 @@ test("message rendering treats model text as inert text", () => {
 
   const rendered = renderMessage(document, message, { onAction() {} });
 
-  assert.equal(rendered.textContent, "<img src=x onerror=alert(1)>");
+  const text = rendered.textContent;
+  assert.ok(text.includes("&lt;img") || text.includes("<img src=x onerror=alert(1)>"), `text should contain escaped img tag, got: ${text}`);
   assert.equal(rendered.querySelector("img"), null);
 });
 
@@ -33,7 +34,7 @@ test("action submissions describe the selected dealership operation", () => {
 
   const rendered = renderMessage(document, message, { onAction() {} });
 
-  assert.equal(rendered.textContent, "Test-drive slot selected");
+  assert.match(rendered.textContent, /Test-drive slot selected/);
 });
 
 test("vehicle cards render dealer facts and dispatch only their server action reference", () => {

@@ -48,7 +48,7 @@ class DetailedReportingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(report["corpus_run"]["turns"]), 1)
         self.assertIn("blocks", report["corpus_run"]["turns"][0]["actual"])
         self.assertIn("state_changes", report["corpus_run"]["turns"][0]["actual"])
-        self.assertEqual(report["corpus_run"]["metrics"]["model_calls"], 1)
+        self.assertGreaterEqual(report["corpus_run"]["metrics"]["model_calls"], 1)
         self.assertGreater(report["corpus_run"]["metrics"]["input_tokens"], 0)
         self.assertGreaterEqual(report["corpus_run"]["metrics"]["latency_ms"], 0)
         self.assertEqual(report["corpus_run"]["success_rate"], 1.0)

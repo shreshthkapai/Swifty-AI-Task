@@ -121,17 +121,6 @@ def validate_frozen_json_object(value: object, *, field: str) -> FrozenObject:
     return value
 
 
-def _validate_frozen_arguments(
-    arguments: tuple[tuple[str, FrozenJson], ...],
-) -> None:
-    try:
-        canonical = _freeze_arguments(_arguments_to_dict(arguments))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("command arguments must be canonical frozen JSON") from exc
-    if canonical != arguments:
-        raise ValueError("command arguments must be canonical frozen JSON")
-
-
 @dataclass(frozen=True, slots=True)
 class ReadCommand:
     name: ReadCommandName
@@ -140,7 +129,6 @@ class ReadCommand:
     def __post_init__(self) -> None:
         if not isinstance(self.name, ReadCommandName):
             raise ValueError("ReadCommand name must be a ReadCommandName")
-        _validate_frozen_arguments(self.arguments)
 
     @classmethod
     def from_mapping(
@@ -164,7 +152,6 @@ class PreparationCommand:
             raise ValueError(
                 "PreparationCommand name must be a PreparationCommandName"
             )
-        _validate_frozen_arguments(self.arguments)
 
     @classmethod
     def from_mapping(

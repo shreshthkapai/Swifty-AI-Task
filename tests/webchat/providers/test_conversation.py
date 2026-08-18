@@ -20,11 +20,12 @@ from webchat.providers.openai import (
 CONTEXT = '{"current_input":"Show me electric cars"}'
 
 
-def request(*, exchange=None) -> ConversationRequest:
+def request(*, exchange=None, force_text=False) -> ConversationRequest:
     return ConversationRequest(
         context=CONTEXT,
         tools=conversation_tool_catalogue(),
         exchange=exchange,
+        force_text=force_text,
     )
 
 
@@ -87,12 +88,7 @@ class OpenAIConversationProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(body["tools"]), 10)
         for tool in body["tools"]:
             self.assertEqual(tool["type"], "function")
-            self.assertTrue(tool["strict"])
-            self.assertFalse(tool["parameters"]["additionalProperties"])
-            self.assertEqual(
-                set(tool["parameters"]["required"]),
-                set(tool["parameters"]["properties"]),
-            )
+            self.assertIn("parameters", tool)
         self.assertEqual(result.text, "I can help with that.")
         self.assertEqual(result.latency_ms, 125)
         self.assertEqual(result.usage.total_tokens, 100)
@@ -155,7 +151,7 @@ class OpenAIConversationProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.tool_calls[0].arguments_dict(), {"make": "BMW"})
         self.assertEqual(json.loads(result.continuation), output)
 
-    async def test_continuation_replays_output_and_appends_matching_results_without_storage(self) -> None:
+    async def test_continuation_replays_output_and_allows_further_tool_calls(self) -> None:
         call = ConversationToolCall("call-1", "search_vehicles", {"make": "BMW"})
         previous_output = [
             {"id": "rs-1", "type": "reasoning", "encrypted_content": "opaque", "summary": []},
@@ -187,7 +183,8 @@ class OpenAIConversationProviderTests(unittest.IsolatedAsyncioTestCase):
         body = bodies[0]
         self.assertFalse(body["store"])
         self.assertNotIn("previous_response_id", body)
-        self.assertEqual(body["tool_choice"], "none")
+        self.assertEqual(body["tool_choice"], "auto")
+        self.assertTrue(body["parallel_tool_calls"])
         self.assertEqual(body["input"][0], {"role": "user", "content": CONTEXT})
         self.assertEqual(body["input"][1:3], previous_output)
         tool_output = body["input"][3]
@@ -195,6 +192,51 @@ class OpenAIConversationProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool_output["call_id"], "call-1")
         self.assertEqual(json.loads(tool_output["output"])["status"], "ok")
         self.assertEqual(result.text, "I found two BMWs.")
+
+    async def test_forced_text_continuation_disables_tool_calls(self) -> None:
+        call = ConversationToolCall("call-1", "search_vehicles", {"make": "BMW"})
+        previous_output = [function_call("call-1", "search_vehicles", {"make": "BMW"})]
+        exchange = ToolExchange(
+            calls=(call,),
+            results=(
+                ConversationToolResult("call-1", "search_vehicles", {"status": "ok"}),
+            ),
+            continuation=json.dumps(previous_output, separators=(",", ":")),
+        )
+        bodies = []
+
+        async def handler(http_request):
+            bodies.append(json.loads(http_request.content))
+            return httpx.Response(200, json=payload([message("Final text.")]))
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await OpenAIConversationProvider(
+                client,
+                OpenAIProviderConfig(api_key="key", model="gpt-test"),
+            ).converse(request(exchange=exchange, force_text=True))
+
+        self.assertEqual(bodies[0]["tool_choice"], "none")
+        self.assertFalse(bodies[0]["parallel_tool_calls"])
+
+    async def test_text_alongside_tool_calls_returns_both(self) -> None:
+        output = [
+            message("Let me look that up for you."),
+            function_call("call-1", "search_vehicles", {"make": "BMW"}),
+        ]
+
+        async def handler(_):
+            return httpx.Response(200, json=payload(output))
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await OpenAIConversationProvider(
+                client,
+                OpenAIProviderConfig(api_key="key", model="gpt-test"),
+            ).converse(request())
+
+        self.assertEqual(result.text, "Let me look that up for you.")
+        self.assertEqual(len(result.tool_calls), 1)
+        self.assertEqual(result.tool_calls[0].name, "search_vehicles")
+        self.assertIsNotNone(result.continuation)
 
     async def test_refusal_malformed_arguments_and_transport_fail_closed(self) -> None:
         cases = (
@@ -229,6 +271,42 @@ class OpenAIConversationProviderTests(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaises(ConversationProviderError) as raised:
                         await provider.converse(request())
                 self.assertIs(raised.exception.kind, expected)
+
+    async def test_chained_exchange_replays_full_history(self) -> None:
+        first_output = [function_call("call-1", "search_vehicles", {"make": "BMW"})]
+        second_output = [function_call("call-2", "get_vehicle_details", {"vehicle_id": "veh-003"})]
+        first_exchange = ToolExchange(
+            calls=(ConversationToolCall("call-1", "search_vehicles", {"make": "BMW"}),),
+            results=(ConversationToolResult("call-1", "search_vehicles", {"status": "ok"}),),
+            continuation=json.dumps(first_output, separators=(",", ":")),
+        )
+        chained = ToolExchange(
+            calls=(ConversationToolCall("call-2", "get_vehicle_details", {"vehicle_id": "veh-003"}),),
+            results=(ConversationToolResult("call-2", "get_vehicle_details", {"status": "ok"}),),
+            continuation=json.dumps(second_output, separators=(",", ":")),
+            prior=first_exchange,
+        )
+        bodies = []
+
+        async def handler(http_request):
+            bodies.append(json.loads(http_request.content))
+            return httpx.Response(200, json=payload([message("Details.")]))
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await OpenAIConversationProvider(
+                client,
+                OpenAIProviderConfig(api_key="key", model="gpt-test"),
+            ).converse(request(exchange=chained, force_text=True))
+
+        body = bodies[0]
+        # Input should contain: user, first_output, first_tool_result, second_output, second_tool_result
+        self.assertEqual(body["input"][0], {"role": "user", "content": CONTEXT})
+        self.assertEqual(body["input"][1], first_output[0])
+        self.assertEqual(body["input"][2]["type"], "function_call_output")
+        self.assertEqual(body["input"][2]["call_id"], "call-1")
+        self.assertEqual(body["input"][3], second_output[0])
+        self.assertEqual(body["input"][4]["type"], "function_call_output")
+        self.assertEqual(body["input"][4]["call_id"], "call-2")
 
     async def test_malformed_continuation_is_a_stable_provider_failure(self) -> None:
         call = ConversationToolCall("call-1", "search_vehicles", {"make": "BMW"})

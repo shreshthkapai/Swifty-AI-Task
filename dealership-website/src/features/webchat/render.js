@@ -1,4 +1,5 @@
 import { assetUrl } from "../../shared/api.js";
+import { renderMarkdown } from "./markdown.js";
 
 const LABELS = {
   address: "Address",
@@ -68,6 +69,19 @@ function formatDateTime(value) {
   if (Number.isNaN(parsed.valueOf())) return String(value);
   return new Intl.DateTimeFormat("en-GB", {
     weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+  }).format(parsed);
+}
+
+function formatTimestamp(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) return "";
+  const now = new Date();
+  const isToday = parsed.toDateString() === now.toDateString();
+  if (isToday) {
+    return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(parsed);
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
   }).format(parsed);
 }
 
@@ -273,7 +287,11 @@ function renderLink(document, payload) {
 function renderBlock(document, block, onAction) {
   const payload = block?.payload || {};
   if (payload.schema_version !== 1) return element(document, "p", "ns-chat-notice", "This response cannot be displayed.");
-  if (block.kind === "text") return element(document, "p", "ns-chat-text", payload.text || "");
+  if (block.kind === "text") {
+    const container = element(document, "div", "ns-chat-text");
+    container.innerHTML = renderMarkdown(payload.text || "");
+    return container;
+  }
   if (block.kind === "notice") {
     const notice = element(document, "div", "ns-chat-notice", payload.text || "");
     notice.dataset.noticeCode = payload.code || "notice";
@@ -300,7 +318,18 @@ export function renderMessage(document, message, { onAction }) {
   const article = element(document, "article", `ns-chat-message ns-chat-message--${message.role || "assistant"}`);
   article.dataset.messageId = message.message_id || "";
   article.setAttribute("aria-label", message.role === "user" ? "You" : "Northstar AI");
-  if (typeof message.text === "string") article.append(element(document, "p", "ns-chat-bubble", message.text));
+  if (typeof message.text === "string") {
+    const bubble = element(document, "div", "ns-chat-bubble");
+    if (message.role === "assistant") {
+      bubble.innerHTML = renderMarkdown(message.text);
+    } else {
+      bubble.textContent = message.text;
+    }
+    article.append(bubble);
+  }
   for (const block of message.blocks || []) article.append(renderBlock(document, block, onAction));
+  if (message.created_at) {
+    article.append(element(document, "time", "ns-chat-timestamp", formatTimestamp(message.created_at)));
+  }
   return article;
 }

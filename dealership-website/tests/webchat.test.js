@@ -327,7 +327,7 @@ test("new conversation requires an in-panel confirmation before deletion", async
   root.querySelector('[data-role="confirm-reset"]').click();
   await chat.whenIdle();
   assert.equal(deleted, 1);
-  assert.match(root.querySelector('[data-role="transcript"]').textContent, /How can I help/);
+  assert.match(root.querySelector('[data-role="transcript"]').textContent, /Northstar assistant/);
 });
 
 test("page observation exposes only relative URL, current vehicle and visible filters", () => {

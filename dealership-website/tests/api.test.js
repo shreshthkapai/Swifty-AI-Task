@@ -24,10 +24,12 @@ test("chat API restores the cookie-backed session with credentials", async () =>
   const session = await api.getSession();
 
   assert.equal(session.revision, 0);
-  assert.deepEqual(requests, [{
-    url: "http://localhost:4020/api/chat/session",
-    options: { method: "GET", credentials: "include", headers: { Accept: "application/json" } },
-  }]);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "http://localhost:4020/api/chat/session");
+  assert.equal(requests[0].options.method, "GET");
+  assert.equal(requests[0].options.credentials, "include");
+  assert.deepEqual(requests[0].options.headers, { Accept: "application/json" });
+  assert.ok(requests[0].options.signal instanceof AbortSignal, "request includes an abort signal for timeout");
 });
 
 test("chat API sends one strict JSON turn payload", async () => {

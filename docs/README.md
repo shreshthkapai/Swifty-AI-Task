@@ -3,10 +3,9 @@
 ## Reviewer reading order
 
 1. [Product Brief](../PRODUCT-BRIEF.md): supplied requirements and marking context.
-2. [Solution Architecture](./ARCHITECTURE.md): implementation boundaries, runtime decisions, safety,
-   portability, and verification.
-3. [Implementation Handoff](./HANDOFF.md): code map, call paths, invariants, and extension points.
-4. Supplied platform references:
+2. [Solution Architecture](./ARCHITECTURE.md): boundaries, design decisions, call paths, code map,
+   safety invariants, and extension points.
+3. Supplied platform references:
    - [Integration Guide](./INTEGRATION-GUIDE.md)
    - [Business Semantics](./BUSINESS-SEMANTICS.md)
    - [Seeded Scenarios](./SEEDED-SCENARIOS.md)

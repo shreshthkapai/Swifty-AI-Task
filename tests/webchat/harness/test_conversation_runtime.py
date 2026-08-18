@@ -5,6 +5,7 @@ import unittest
 
 from webchat.domain.common import Page
 from webchat.domain.errors import DealerErrorKind, DealerFailure
+from webchat.domain.vehicles import VehicleDetails
 from webchat.harness.actions import (
     PendingAction,
     PendingActionState,
@@ -175,22 +176,61 @@ class ConversationRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(output["facts"])
         self.assertEqual(output["entities"], ["veh-ev"])
 
-    async def test_second_tool_round_is_rejected_without_executing_it(self) -> None:
+    async def test_second_tool_round_executes_follow_up_reads(self) -> None:
         fake_dealer = dealer()
         fake_dealer.search_vehicles.return_value = Page(
             (vehicle(),), 1, 10, 1, 1
         )
+        fake_dealer.get_vehicle.return_value = VehicleDetails(vehicle=vehicle(), highlights=("Low mileage",))
         first = ConversationToolCall("call-1", "search_vehicles", {"make": "BMW"})
-        forbidden = ConversationToolCall("call-2", "get_vehicle_details", {"vehicle_id": "veh-003"})
-        provider = QueueProvider(calls(first), calls(forbidden))
+        follow_up = ConversationToolCall("call-2", "get_vehicle_details", {"vehicle_id": "veh-003"})
+        provider = QueueProvider(
+            calls(first),
+            calls(follow_up),
+            answer("Here are the details for the BMW X3."),
+        )
         runtime = ConversationRuntime(dealer=fake_dealer, conversation=provider)
 
         result = await runtime.handle(
-            TurnRequest(current_input="Show me a BMW", state=ConversationState(), now=NOW)
+            TurnRequest(
+                current_input="Show me a BMW then details on the first one",
+                state=ConversationState(),
+                now=NOW,
+            )
         )
 
-        fake_dealer.get_vehicle.assert_not_awaited()
-        self.assertEqual(result.model_calls, 2)
+        fake_dealer.get_vehicle.assert_awaited_once()
+        self.assertEqual(result.model_calls, 3)
+        self.assertIsNone(result.provider_failure)
+        self.assertEqual(
+            result.executed_commands,
+            ("search_vehicles", "get_vehicle_details"),
+        )
+        kinds = [block.kind for block in result.blocks]
+        self.assertIn("text", kinds)
+        self.assertIn("vehicle_cards", kinds)
+
+    async def test_third_tool_round_is_rejected(self) -> None:
+        fake_dealer = dealer()
+        fake_dealer.search_vehicles.return_value = Page(
+            (vehicle(),), 1, 10, 1, 1
+        )
+        fake_dealer.get_vehicle.return_value = VehicleDetails(vehicle=vehicle(), highlights=("Low mileage",))
+        first = ConversationToolCall("call-1", "search_vehicles", {"make": "BMW"})
+        second = ConversationToolCall("call-2", "get_vehicle_details", {"vehicle_id": "veh-003"})
+        third = ConversationToolCall("call-3", "list_dealerships", {})
+        provider = QueueProvider(calls(first), calls(second), calls(third))
+        runtime = ConversationRuntime(dealer=fake_dealer, conversation=provider)
+
+        result = await runtime.handle(
+            TurnRequest(
+                current_input="Everything about BMWs",
+                state=ConversationState(),
+                now=NOW,
+            )
+        )
+
+        self.assertEqual(result.model_calls, 3)
         self.assertEqual(result.provider_failure, "tool_round_limit")
         self.assertEqual(result.blocks[0].to_dict()["payload"]["code"], "provider_unavailable")
 

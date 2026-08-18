@@ -1,4 +1,5 @@
 const DEFAULT_BASE_URL = "http://localhost:4020";
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 export class ChatApiError extends Error {
   constructor(message, { code = "chat_unavailable", status = 0, retryable = true } = {}) {
@@ -12,6 +13,12 @@ export class ChatApiError extends Error {
 
 function endpoint(baseUrl, path) {
   return `${String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}${path}`;
+}
+
+function withTimeout(timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return { signal: controller.signal, clear() { clearTimeout(timer); } };
 }
 
 async function parseResponse(response) {
@@ -49,7 +56,7 @@ function validatePayload(payload, status = 200) {
   return payload;
 }
 
-async function parseTurnStream(response, onTextDelta) {
+async function parseTurnStream(response, onTextDelta, signal) {
   if (!response.ok) return parseResponse(response);
   if (!response.body || typeof response.body.getReader !== "function") {
     throw new ChatApiError("Chat returned an unexpected response.", {
@@ -57,6 +64,7 @@ async function parseTurnStream(response, onTextDelta) {
     });
   }
   const reader = response.body.getReader();
+  if (signal) signal.addEventListener("abort", () => reader.cancel(), { once: true });
   const decoder = new TextDecoder();
   let buffer = "";
   let completed = null;
@@ -122,14 +130,17 @@ export function createChatApi({ baseUrl = DEFAULT_BASE_URL, fetchImpl = globalTh
   if (typeof fetchImpl !== "function") throw new TypeError("fetchImpl must be a function");
 
   async function request(path, options) {
+    const timeout = withTimeout();
     try {
-      return await parseResponse(await fetchImpl(endpoint(baseUrl, path), options));
+      return await parseResponse(await fetchImpl(endpoint(baseUrl, path), { ...options, signal: timeout.signal }));
     } catch (error) {
       if (error instanceof ChatApiError) throw error;
       throw new ChatApiError("Chat is temporarily unavailable. Please try again.", {
         code: "network_error",
         retryable: true,
       });
+    } finally {
+      timeout.clear();
     }
   }
 
@@ -143,28 +154,34 @@ export function createChatApi({ baseUrl = DEFAULT_BASE_URL, fetchImpl = globalTh
     },
 
     async sendTurn(payload, { onTextDelta } = {}) {
+      const timeout = withTimeout();
       try {
         const response = await fetchImpl(endpoint(baseUrl, "/api/chat/turns/stream"), {
           method: "POST",
           credentials: "include",
           headers: { Accept: "application/x-ndjson", "Content-Type": "application/json" },
           body: JSON.stringify(payload),
+          signal: timeout.signal,
         });
-        return await parseTurnStream(response, onTextDelta);
+        return await parseTurnStream(response, onTextDelta, timeout.signal);
       } catch (error) {
         if (error instanceof ChatApiError) throw error;
         throw new ChatApiError("Chat is temporarily unavailable. Please try again.", {
           code: "network_error", retryable: true,
         });
+      } finally {
+        timeout.clear();
       }
     },
 
     async deleteSession() {
+      const timeout = withTimeout();
       try {
         const response = await fetchImpl(endpoint(baseUrl, "/api/chat/session"), {
           method: "DELETE",
           credentials: "include",
           headers: { Accept: "application/json" },
+          signal: timeout.signal,
         });
         if (response.status === 204) return;
         await parseResponse(response);
@@ -174,6 +191,8 @@ export function createChatApi({ baseUrl = DEFAULT_BASE_URL, fetchImpl = globalTh
           code: "network_error",
           retryable: true,
         });
+      } finally {
+        timeout.clear();
       }
     },
   };

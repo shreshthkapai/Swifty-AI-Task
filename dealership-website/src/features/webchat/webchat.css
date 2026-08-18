@@ -291,6 +291,59 @@
   color: var(--white);
 }
 
+.ns-chat-bubble p,
+.ns-chat-text p {
+  margin: 0;
+}
+
+.ns-chat-bubble p + p,
+.ns-chat-text p + p {
+  margin-top: 8px;
+}
+
+.ns-chat-bubble ul,
+.ns-chat-bubble ol,
+.ns-chat-text ul,
+.ns-chat-text ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.ns-chat-bubble li,
+.ns-chat-text li {
+  margin-top: 3px;
+  line-height: 1.5;
+}
+
+.ns-chat-bubble code,
+.ns-chat-text code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.ns-chat-message--user .ns-chat-bubble code {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.ns-chat-bubble a,
+.ns-chat-text a {
+  color: var(--forest);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ns-chat-message--user .ns-chat-bubble a {
+  color: var(--accent);
+}
+
+.ns-chat-bubble strong,
+.ns-chat-text strong {
+  font-weight: 720;
+}
+
 .ns-chat-streaming .ns-chat-bubble::after {
   content: "";
   display: inline-block;
@@ -305,6 +358,80 @@
 
 @keyframes ns-chat-cursor {
   50% { opacity: 0; }
+}
+
+.ns-chat-typing-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 86%;
+  padding: 14px 18px;
+  border-radius: 10px 10px 10px 3px;
+  background: var(--soft);
+}
+
+.ns-chat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9aa8ab;
+  animation: ns-chat-bounce 1.4s ease-in-out infinite;
+}
+
+.ns-chat-dot:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.ns-chat-dot:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes ns-chat-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-5px); opacity: 1; }
+}
+
+.ns-chat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  animation: ns-chat-content-in 220ms ease-out both;
+}
+
+.ns-chat-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--forest);
+  cursor: pointer;
+  padding: 7px 13px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.ns-chat-chip:hover {
+  border-color: var(--forest);
+  background: var(--soft);
+  transform: translateY(-1px);
+}
+
+.ns-chat-chip:active {
+  transform: scale(0.97);
+}
+
+.ns-chat-timestamp {
+  display: block;
+  color: #9aa8ab;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.ns-chat-message--user .ns-chat-timestamp {
+  text-align: right;
 }
 
 .ns-chat-action-submission {

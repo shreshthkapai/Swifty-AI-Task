@@ -1,3 +1,4 @@
+import { renderMarkdown } from "./markdown.js";
 import { renderMessage } from "./render.js";
 
 function element(document, tagName, className, text) {
@@ -105,15 +106,60 @@ function shell(document) {
   return { launcher, panel, status, transcript, error, errorText, retry, resetConfirmation, reset, close, form, textarea, send, availability };
 }
 
-function welcome(document, onPrompt) {
+function contextualPrompts(observation) {
+  const url = observation?.current_url || "";
+  const vehicleId = observation?.page_vehicle_id;
+  const filters = observation?.search_filters;
+
+  if (vehicleId) {
+    return {
+      heading: "Interested in this vehicle?",
+      subtitle: "I can help with details, availability, test drives or finance.",
+      prompts: ["Is this car available?", "Book a test drive for this car", "What finance options are there?"],
+    };
+  }
+
+  if (url.includes("service") || url.includes("workshop")) {
+    return {
+      heading: "Need a service or repair?",
+      subtitle: "I can help you book, reschedule or check on a workshop appointment.",
+      prompts: ["Book a service", "Check my booking status", "What services do you offer?"],
+    };
+  }
+
+  if (url.includes("location") || url.includes("contact")) {
+    return {
+      heading: "Looking for a dealership?",
+      subtitle: "I can find opening hours, directions and contact details.",
+      prompts: ["Find my nearest dealership", "What are your opening hours?", "Send a message to the team"],
+    };
+  }
+
+  if (url.includes("vehicles") || filters) {
+    return {
+      heading: "Looking for the right car?",
+      subtitle: "Tell me what you're after and I'll search our stock.",
+      prompts: ["Show me electric SUVs", "What's available under £25,000?", "Compare the top options"],
+    };
+  }
+
+  return {
+    heading: "How can I help today?",
+    subtitle: "Search current stock, arrange a test drive, manage a workshop booking or find a dealership.",
+    prompts: ["Show me available SUVs", "Book a service", "Find my nearest dealership"],
+  };
+}
+
+function welcome(document, onPrompt, observation) {
+  const ctx = contextualPrompts(observation);
   const container = element(document, "section", "ns-chat-welcome");
   container.append(
     element(document, "p", "ns-chat-kicker", "Northstar assistant"),
-    element(document, "h3", null, "How can I help today?"),
-    element(document, "p", "ns-chat-muted", "Search current stock, arrange a test drive, manage a workshop booking or find a dealership."),
+    element(document, "h3", null, ctx.heading),
+    element(document, "p", "ns-chat-muted", ctx.subtitle),
   );
   const prompts = element(document, "div", "ns-chat-prompts");
-  for (const prompt of ["Show me available SUVs", "Book a service", "Find my nearest dealership"]) {
+  for (const prompt of ctx.prompts) {
     const button = element(document, "button", "ns-chat-prompt", prompt);
     button.type = "button";
     button.addEventListener("click", () => onPrompt(prompt));
@@ -121,6 +167,19 @@ function welcome(document, onPrompt) {
   }
   container.append(prompts);
   return container;
+}
+
+function typingIndicator(document) {
+  const wrapper = element(document, "article", "ns-chat-message ns-chat-message--assistant ns-chat-typing");
+  wrapper.setAttribute("aria-label", "Northstar AI is typing");
+  const bubble = element(document, "div", "ns-chat-typing-dots");
+  bubble.append(
+    element(document, "span", "ns-chat-dot"),
+    element(document, "span", "ns-chat-dot"),
+    element(document, "span", "ns-chat-dot"),
+  );
+  wrapper.append(bubble);
+  return wrapper;
 }
 
 function streamingMessage(document, text) {
@@ -133,6 +192,48 @@ function streamingMessage(document, text) {
   message.classList.add("ns-chat-streaming");
   message.setAttribute("aria-label", "Northstar AI is responding");
   return message;
+}
+
+function suggestFollowUps(lastMessage) {
+  if (!lastMessage || lastMessage.role !== "assistant") return [];
+  const blocks = lastMessage.blocks || [];
+  const kinds = new Set(blocks.map((b) => b.kind));
+
+  if (kinds.has("vehicle_cards")) {
+    return ["Tell me more about the first one", "Anything cheaper?", "Book a test drive"];
+  }
+  if (kinds.has("confirmation")) {
+    return [];
+  }
+  if (kinds.has("slot_choices")) {
+    return ["Show me different dates", "A different location?"];
+  }
+  if (kinds.has("dealerships")) {
+    return ["What are their opening hours?", "Send them a message"];
+  }
+  if (kinds.has("workshop_services")) {
+    return ["Book a service", "How long does it take?"];
+  }
+  if (kinds.has("opening_hours")) {
+    return ["Are you open this weekend?", "Book an appointment"];
+  }
+
+  if (lastMessage.text) {
+    return ["Tell me more", "Show me some options"];
+  }
+  return [];
+}
+
+function renderChips(document, suggestions, onPrompt) {
+  if (!suggestions.length) return null;
+  const container = element(document, "div", "ns-chat-chips");
+  for (const text of suggestions) {
+    const chip = element(document, "button", "ns-chat-chip", text);
+    chip.type = "button";
+    chip.addEventListener("click", () => onPrompt(text));
+    container.append(chip);
+  }
+  return container;
 }
 
 function cleanFilters(controls) {
@@ -199,13 +300,18 @@ export function createWebchat({ root, api, getPageObservation, document = global
       >= nodes.transcript.scrollHeight - 2
     );
     const fragment = document.createDocumentFragment();
-    if (!messages.length && !optimisticText) fragment.append(welcome(document, submitText));
+    if (!messages.length && !optimisticText) fragment.append(welcome(document, submitText, getPageObservation()));
     for (const item of messages) fragment.append(renderMessage(document, item, { onAction: submitAction }));
     if (optimisticText) {
       fragment.append(renderMessage(document, {
         message_id: "optimistic", role: "user", text: optimisticText, blocks: [],
       }, { onAction: submitAction }));
     }
+    if (!busy && !optimisticText && messages.length) {
+      const chips = renderChips(document, suggestFollowUps(messages[messages.length - 1]), submitText);
+      if (chips) fragment.append(chips);
+    }
+    if (busy && !streamingText) fragment.append(typingIndicator(document));
     if (streamingText) fragment.append(streamingMessage(document, streamingText));
     nodes.transcript.replaceChildren(fragment);
     applyBusyState();
@@ -233,13 +339,15 @@ export function createWebchat({ root, api, getPageObservation, document = global
       nodes.transcript.scrollTop + nodes.transcript.clientHeight
       >= nodes.transcript.scrollHeight - 2
     );
+    const indicator = nodes.transcript.querySelector(".ns-chat-typing");
+    if (indicator) indicator.remove();
     streamingText += delta;
     let draft = nodes.transcript.querySelector(".ns-chat-streaming");
     if (!draft) {
       draft = streamingMessage(document, streamingText);
       nodes.transcript.append(draft);
     } else {
-      draft.querySelector(".ns-chat-bubble").textContent = streamingText;
+      draft.querySelector(".ns-chat-bubble").innerHTML = renderMarkdown(streamingText);
     }
     setStatus("", true);
     if (wasAtBottom) {
@@ -351,7 +459,6 @@ export function createWebchat({ root, api, getPageObservation, document = global
       optimisticText = null;
       streamingText = "";
       nodes.resetConfirmation.hidden = true;
-      renderTranscript({ anchor: "bottom", behavior: "auto" });
     } catch (error) {
       showError(error, () => {
         inFlight = resetConversation();
@@ -360,10 +467,16 @@ export function createWebchat({ root, api, getPageObservation, document = global
     } finally {
       busy = false;
       applyBusyState();
+      renderTranscript({ anchor: "bottom", behavior: "auto" });
       nodes.textarea.focus();
     }
   }
 
+  if (typeof globalThis.addEventListener === "function") {
+    globalThis.addEventListener("hashchange", () => {
+      if (!messages.length && !busy) renderTranscript();
+    });
+  }
   nodes.launcher.addEventListener("click", () => setOpen(true));
   nodes.close.addEventListener("click", () => setOpen(false));
   nodes.panel.addEventListener("keydown", (event) => {
