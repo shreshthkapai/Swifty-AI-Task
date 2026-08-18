@@ -193,7 +193,6 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 20px 18px 24px;
-  scroll-behavior: smooth;
   scrollbar-color: #cbd4d2 transparent;
   scrollbar-width: thin;
 }

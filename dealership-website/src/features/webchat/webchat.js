@@ -388,6 +388,7 @@ export function createWebchat({ root, api, getPageObservation, document = global
     root.classList.toggle("is-open", open);
     if (open) {
       root.classList.remove("has-unread");
+      nodes.transcript.scrollTo({ top: nodes.transcript.scrollHeight, behavior: "instant" });
       nodes.textarea.focus();
     } else {
       nodes.launcher.focus();
@@ -401,7 +402,7 @@ export function createWebchat({ root, api, getPageObservation, document = global
     streamingText = "";
     clearError();
     setStatus("Northstar AI is working…", true);
-    renderTranscript({ anchor: "bottom" });
+    renderTranscript({ anchor: "bottom", behavior: "instant" });
     let completed = false;
     try {
       const result = await api.sendTurn(payload, { onTextDelta: appendTextDelta });
@@ -420,7 +421,7 @@ export function createWebchat({ root, api, getPageObservation, document = global
     } finally {
       busy = false;
       setStatus("", false);
-      renderTranscript({ anchor: completed ? "response" : "preserve" });
+      renderTranscript({ anchor: completed ? "response" : "preserve", behavior: "instant" });
       if (open) nodes.textarea.focus();
     }
   }
